@@ -1,0 +1,28 @@
+# Valhalla routing and map-matching engine for la-live.
+#
+# First start builds tiles from every .osm.pbf in data/valhalla/custom_files
+# (the corridor clip made in docs/log/step1.md), later starts reuse them.
+# To rebuild after replacing the PBF: set force_rebuild=True once, or delete
+# data/valhalla/custom_files/valhalla_tiles* and restart.
+#
+# Image pinned by digest (ghcr.io/valhalla/valhalla-scripted:latest as pulled
+# on 2026-11-05, Valhalla 3.9.x, linux/arm64).
+services:
+  valhalla:
+    image: ghcr.io/valhalla/valhalla-scripted:latest@sha256:1fbcad26388aad3b1af56b57127128fdc7e5a5536da852c293ffc13c9dc170b4
+    container_name: la-live-valhalla
+    ports:
+      - "8002:8002"
+    volumes:
+      - ./data/valhalla/custom_files:/custom_files
+    environment:
+      server_threads: 4
+      use_tiles_ignore_pbf: "True"
+      force_rebuild: "False"
+      build_elevation: "False"
+      build_admins: "True"
+      build_time_zones: "True"
+      build_transit: "False"
+      build_tar: "True"
+      serve_tiles: "True"
+    restart: unless-stopped

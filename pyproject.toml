@@ -1,0 +1,19 @@
+[project]
+name = "la-live"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "gtfs-realtime-bindings>=3.0.0",
+    "httpx>=0.28.1",
+    "pydantic>=2.14.3",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"

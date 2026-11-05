@@ -2,7 +2,7 @@
 
 Live transit and traffic for Los Angeles, built from open data and open-source software. Vehicles from every agency that publishes GTFS-Realtime, freeway speeds from Caltrans detectors, incidents and closures from CHP and Caltrans, vehicle counts from Caltrans traffic cameras, and surface-street traffic inferred from the buses themselves, drawn on the OpenStreetMap road network in a browser with terrain and buildings.
 
-Status: planning complete, nothing built yet. The plan with every verified data source is [docs/plan.md](docs/plan.md); the source inventories are under [docs/research](docs/research). First area: the Westside to downtown corridor.
+Status: step 1 of the plan done on 2026-11-05. Valhalla 3.9.1 serves map-matching tiles for the corridor from a clipped Geofabrik extract (`docker compose up -d`), and `prep/trace_match.py` collects a Big Blue Bus trace and matches it; the run and its checks are in [docs/log/step1.md](docs/log/step1.md). The plan with every verified data source is [docs/plan.md](docs/plan.md); the source inventories are under [docs/research](docs/research). First area: the Westside to downtown corridor.
 
 ## How it fits together
 

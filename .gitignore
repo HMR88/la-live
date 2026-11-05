@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[oc]
+.venv/
+.pytest_cache/
+
+# Data that is downloaded or generated (the README says how to rebuild it)
+data/downloads/
+data/valhalla/
+data/tiles/
+live/
+history/
+*.osm.pbf
+*.pmtiles
+
+# Secrets
+.env

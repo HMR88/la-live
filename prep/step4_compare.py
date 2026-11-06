@@ -19,6 +19,10 @@ from pathlib import Path
 from shapely.geometry import Point
 from shapely.strtree import STRtree
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # the editable install's .pth is skipped on macOS, see docs/log/step7.md
+
 from poller.base import load_base
 from poller.model import TO_UTM
 

@@ -2,7 +2,7 @@
 
 Live transit and traffic for Los Angeles, built from open data and open-source software. Vehicles from every agency that publishes GTFS-Realtime, freeway speeds from Caltrans detectors, incidents and closures from CHP and Caltrans, vehicle counts from Caltrans traffic cameras, and surface-street traffic inferred from the buses themselves, drawn on the OpenStreetMap road network in a browser with terrain and buildings.
 
-Status: steps 1 to 5 of the plan done on 2026-11-05 and 06. Valhalla serves map-matching tiles for the corridor (`docker compose up -d`), the base layers come from a qgis-mcp run (`prep/copy_base.py`), `python -m poller run` turns the live bus feeds of LA Metro, Big Blue Bus, Culver CityBus and LADOT into segment speeds, adds Caltrans detector speeds (a deprecated but live feed), CHP incidents, lane closures and message signs, and writes snapshots under `live/`; `serve.py` serves the `viewer/` page, a MapLibre map with terrain, extruded buildings, roads coloured by speed, vehicles, events, detectors and cameras. Run logs with every check: [docs/log](docs/log). The plan with every verified data source is [docs/plan.md](docs/plan.md); the source inventories are under [docs/research](docs/research). First area: the Westside to downtown corridor.
+Status: steps 1 to 5 and 7 of the plan done on 2026-11-05 and 06. Valhalla serves map-matching tiles for the corridor (`docker compose up -d`), the base layers come from a qgis-mcp run (`prep/copy_base.py`), `python -m poller run` turns the live bus feeds of LA Metro, Big Blue Bus, Culver CityBus and LADOT into segment speeds, adds Caltrans detector speeds (a deprecated but live feed), CHP incidents, lane closures and message signs, and writes snapshots under `live/`; `python -m cameras run` samples 15 s of video from a configured subset of Caltrans cameras, one stream at a time, and counts vehicles per direction with YOLO11 and ByteTrack; `serve.py` serves the `viewer/` page, a MapLibre map with terrain, extruded buildings, roads coloured by speed, vehicles, events, detectors, cameras and camera counts. Run logs with every check: [docs/log](docs/log). The plan with every verified data source is [docs/plan.md](docs/plan.md); the source inventories are under [docs/research](docs/research). First area: the Westside to downtown corridor.
 
 ## How it fits together
 
@@ -11,7 +11,7 @@ Status: steps 1 to 5 of the plan done on 2026-11-05 and 06. Valhalla serves map-
 | Preparation | Roads, transit shapes, detectors and cameras for the area, matched to road segments and written as vector tiles. Runs through [qgis-mcp](https://github.com/HMR88/QGIS) and Valhalla. | `prep/` |
 | Poller | A service that reads the live feeds every 30 to 60 seconds, turns bus movements and detector readings into segment speeds, keeps a history and writes snapshots. | `poller/` |
 | Viewer | A static MapLibre GL JS page that draws the snapshots: roads coloured by speed (absolute now, ratio to baseline after step 6), moving vehicles, incidents, closures, signs, detectors, cameras, terrain and extruded buildings. Served by `serve.py`. | `viewer/` |
-| Cameras | Short video samples from Caltrans cameras, counted and timed with an open detector. Phase 2. | `cameras/` |
+| Cameras | A separate process: 15 s of HLS video per camera from `cameras/subset.json`, decoded with PyAV, tracked with Ultralytics YOLO11 small and ByteTrack on Apple's mps, counted across a line per direction. Writes `live/cameras.geojson` and `history/cameras.sqlite`. Speed needs a per-camera calibration file; none exists yet. Installed with `uv sync --extra cameras`. | `cameras/` |
 
 ## Requirements
 
@@ -29,9 +29,13 @@ docker compose up -d                                   # Valhalla on :8002, tile
 .venv/bin/python prep/step3_report.py                  # summary of a run
 .venv/bin/python prep/step4_compare.py                 # bus speeds against Caltrans detector speeds
 uv run python serve.py                                 # http://127.0.0.1:8080/viewer/ with HTTP Range for the PMTiles
+uv sync --extra cameras                                # PyAV, Ultralytics, torch (about 1 GB), only for the camera sampler
+.venv/bin/python -m cameras preview --out /tmp/cams    # one frame per camera with its counting line, to place lines in cameras/subset.json
+.venv/bin/python -m cameras run --sheets 101 1196      # live/cameras.geojson, history/cameras.sqlite, a round every 5 min, Ctrl-C to stop
+.venv/bin/python prep/step7_compare.py                 # camera counts against detector volumes
 ```
 
-The venv is managed by uv (`uv sync`). For an unattended run on a laptop put `caffeinate -i` in front of the command, or the Mac sleeps and the cycles stall. Checks: `.venv/bin/pyright poller tests prep` and `.venv/bin/python -m pytest tests`.
+The venv is managed by uv (`uv sync`). For an unattended run on a laptop put `caffeinate -i` in front of the command, or the Mac sleeps and the cycles stall. Checks: `.venv/bin/pyright` and `.venv/bin/python -m pytest tests` (the camera tests need the `cameras` extra).
 
 ## Licence
 

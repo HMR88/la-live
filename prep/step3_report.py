@@ -12,6 +12,10 @@ import sqlite3
 import statistics
 from pathlib import Path
 
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # the editable install's .pth is skipped on macOS, see docs/log/step7.md
+
 from poller.base import load_base
 from poller.shape_index import ShapeIndex
 

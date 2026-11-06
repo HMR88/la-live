@@ -16,3 +16,4 @@ history/
 
 # Secrets
 .env
+data/models/

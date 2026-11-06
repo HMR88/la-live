@@ -12,11 +12,24 @@ dependencies = [
     "websockets>=17.4",
 ]
 
+[project.optional-dependencies]
+cameras = [
+    "av>=15",
+    "imageio-ffmpeg>=0.6",
+    "lap>=0.5.12",
+    "ultralytics>=8.3",
+]
+
 [dependency-groups]
 dev = [
     "pyright>=1.1.414",
     "pytest>=9.2.0",
 ]
+
+[tool.pytest.ini_options]
+# The repository root on sys.path: uv 0.13 flags the whole .venv hidden on macOS and CPython 3.13.18 skips
+# hidden .pth files, so the editable install is not reliable. See docs/log/step7.md section 7.
+pythonpath = ["."]
 
 [tool.pyright]
 venvPath = "."

@@ -1,0 +1,12 @@
+# ByteTrack settings for Caltrans 720p traffic cameras (docs/log/step7.md section 3).
+# fuse_score False is the one that matters: Ultralytics' default multiplies the box overlap by the detection
+# confidence before matching, and vehicles in these soft frames score 0.1 to 0.3 with YOLO11s, so almost no
+# detection matched its track (2 tracked boxes per frame out of 20 detections on CCTV-1196). Without fusion,
+# 15 of 20 are tracked. Thresholds are lowered for the same reason; match_thresh 0.9 gives longer tracks at 15 fps.
+tracker_type: bytetrack
+track_high_thresh: 0.15
+track_low_thresh: 0.05
+new_track_thresh: 0.15
+track_buffer: 30
+match_thresh: 0.9
+fuse_score: False

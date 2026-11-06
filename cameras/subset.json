@@ -1,0 +1,169 @@
+{
+  "comment": "Cameras the sampler visits, in order. line is [[x0,y0],[x1,y1]] in fractions of width and height, directed p0 -> p1; direction A crosses from its negative (upper, on the default line) side to its positive side. a_label and b_label name those directions once a person has checked the contact sheet; empty means the output says A and B. calibration names a file under cameras/calibration/.",
+  "default_line": [
+    [
+      0.0,
+      0.55
+    ],
+    [
+      1.0,
+      0.55
+    ]
+  ],
+  "cameras": [
+    {
+      "cctv_id": 101,
+      "note": "I-10 McClure West, Santa Monica; contact sheet camera",
+      "line": [
+        [
+          0.0,
+          0.4
+        ],
+        [
+          1.0,
+          0.4
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1028,
+      "note": "I-10 east of Cloverfield",
+      "line": [
+        [
+          0.0,
+          0.45
+        ],
+        [
+          1.0,
+          0.45
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1005,
+      "note": "I-10 Crenshaw; the stream's burned-in clock read 09/12/2026 on 2026-11-06, a stale loop",
+      "line": [
+        [
+          0.0,
+          0.45
+        ],
+        [
+          1.0,
+          0.45
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1235,
+      "note": "I-10 Maple Ave",
+      "line": [
+        [
+          0.0,
+          0.6
+        ],
+        [
+          1.0,
+          0.6
+        ]
+      ]
+    },
+    {
+      "cctv_id": 985,
+      "note": "I-10 Channing St",
+      "line": [
+        [
+          0.0,
+          0.55
+        ],
+        [
+          1.0,
+          0.55
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1026,
+      "note": "I-10 Route 110 CHP tower, 960x540 stream",
+      "line": [
+        [
+          0.0,
+          0.6
+        ],
+        [
+          1.0,
+          0.6
+        ]
+      ]
+    },
+    {
+      "cctv_id": 359,
+      "note": "I-405 La Tijera; the stream's burned-in clock read 11/05 05:3x on 2026-11-06 13:4x, a stale loop",
+      "line": [
+        [
+          0.0,
+          0.5
+        ],
+        [
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1196,
+      "note": "I-405 north of Manchester; contact sheet camera",
+      "line": [
+        [
+          0.0,
+          0.5
+        ],
+        [
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1194,
+      "note": "I-405 south of Manchester; the lens is out of focus, counts are not credible",
+      "line": [
+        [
+          0.0,
+          0.5
+        ],
+        [
+          1.0,
+          0.5
+        ]
+      ]
+    },
+    {
+      "cctv_id": 1190,
+      "note": "I-405 south of Century",
+      "line": [
+        [
+          0.0,
+          0.4
+        ],
+        [
+          1.0,
+          0.4
+        ]
+      ]
+    },
+    {
+      "cctv_id": 25,
+      "note": "I-5 Meadowdale: the only subset camera near ATMS stations that report volume (Dorris, Stadium), kept for the detector comparison",
+      "line": [
+        [
+          0.0,
+          0.5
+        ],
+        [
+          1.0,
+          0.5
+        ]
+      ]
+    }
+  ]
+}

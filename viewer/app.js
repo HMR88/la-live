@@ -11,8 +11,12 @@ const LIVE = {
   vehicles: BASE + "live/vehicles.geojson",
   events: BASE + "live/events.geojson",
   detectors: BASE + "live/detectors.geojson",
+  camera_counts: BASE + "live/cameras.geojson", // written by the camera sampler, a separate process
   status: BASE + "live/status.json",
 };
+// Vehicles per minute (both directions) ramp for the camera rings. Flow, not speed.
+const FLOW_STOPS = [[0, "#fde0dd"], [40, "#fa9fb5"], [80, "#dd3497"], [120, "#7a0177"]];
+let cameraReadings = {}; // cctv_id -> properties of live/cameras.geojson, for the camera popup
 const REFRESH_MS = 30000;
 const CORRIDOR = [[-118.52, 33.98], [-118.22, 34.09]];
 const AGENCY_COLOUR = { metro: "#e4572e", bbb: "#1f5fbf", ccb: "#2a9d8f", ladot: "#8e44ad" };
@@ -138,6 +142,18 @@ map.on("load", () => {
     },
   });
 
+  const vpm = ["coalesce", ["get", "vehicles_per_min"], 0];
+  const sampledOk = ["==", ["get", "status"], "ok"];
+  map.addLayer({
+    id: "camera-counts", type: "circle", source: "camera_counts", minzoom: 9,
+    paint: {
+      "circle-radius": ["case", sampledOk, ["interpolate", ["linear"], vpm, 0, 9, 60, 15, 150, 24], 9],
+      "circle-color": ["case", sampledOk, ["interpolate", ["linear"], vpm, ...FLOW_STOPS.flat()], "#ffffff"],
+      "circle-opacity": ["case", sampledOk, ["interpolate", ["linear"], ["coalesce", ["get", "age_s"], 0], 300, 0.9, 1800, 0.35], 0.4],
+      "circle-stroke-color": ["case", sampledOk, "#7a0177", "#888"],
+      "circle-stroke-width": 1.5,
+    },
+  });
   map.addLayer({
     id: "cameras", type: "circle", source: "corridor", "source-layer": "cameras", minzoom: 11,
     paint: { "circle-radius": 6, "circle-color": "#222", "circle-stroke-color": "#fff", "circle-stroke-width": 1.5 },
@@ -214,12 +230,33 @@ async function refreshStatus() {
   document.querySelector("#feeds tbody").innerHTML = rows.join("");
 }
 
+async function refreshCameras() {
+  const r = await fetch(LIVE.camera_counts + "?t=" + Date.now(), { cache: "no-store" });
+  const row = document.getElementById("cameras-row") || document.querySelector("#feeds tbody").appendChild(document.createElement("tr"));
+  row.id = "cameras-row";
+  if (!r.ok) {
+    map.getSource("camera_counts").setData({ type: "FeatureCollection", features: [] });
+    cameraReadings = {};
+    row.innerHTML = `<td>camera sampler</td><td class="warn">live/cameras.geojson not found (sampler not run)</td></tr>`;
+    return;
+  }
+  const fc = await r.json();
+  map.getSource("camera_counts").setData(fc);
+  cameraReadings = Object.fromEntries(fc.features.map((f) => [f.properties.cctv_id, f.properties]));
+  const ok = fc.features.filter((f) => f.properties.status === "ok");
+  const ages = fc.features.map((f) => f.properties.age_s).filter((a) => a !== null && a !== undefined);
+  const newest = ages.length ? Math.min(...ages) : null;
+  row.innerHTML = `<td>camera sampler</td><td>${ok.length} of ${fc.features.length} cameras counted, newest sample ` +
+    `<span class="${newest === null || newest > 900 ? "warn" : "ok"}">${ageText(newest)} old</span>; ${fc.note || ""}</td>`;
+}
+
 async function refresh() {
   document.getElementById("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC";
   try {
     for (const name of ["vehicles", "events", "detectors"]) map.getSource(name).setData(LIVE[name] + "?t=" + Date.now());
     await refreshSegments();
     await refreshStatus();
+    await refreshCameras();
   } catch (err) {
     console.error("refresh failed", err);
     document.querySelector("#feeds tbody").innerHTML = `<tr><td class="warn">live files not reachable: ${err}</td></tr>`;
@@ -228,7 +265,7 @@ async function refresh() {
 
 function buildToggles() {
   const groups = { Roads: ["roads"], Vehicles: ["vehicles", "vehicle-labels"], Shapes: ["shapes"], Stops: ["stops"],
-    Events: ["closures", "closure-points", "signs", "incidents", "incident-labels"], Detectors: ["detectors"], Cameras: ["cameras", "camera-labels"],
+    Events: ["closures", "closure-points", "signs", "incidents", "incident-labels"], Detectors: ["detectors"], Cameras: ["cameras", "camera-labels"], "Camera counts": ["camera-counts"],
     Buildings: ["buildings-3d"], Hillshade: ["hillshade"] };
   const box = document.getElementById("toggles");
   for (const [label, ids] of Object.entries(groups)) {
@@ -257,7 +294,18 @@ function buildLegend() {
   const el = document.getElementById("legend");
   el.innerHTML = SPEED_STOPS.map(([v, c]) => `<span style="background:${c}">${v}</span>`).join("") + `<span style="background:#bdbdbd;color:#333;text-shadow:none">none</span>`;
   const agencies = Object.entries(AGENCY_NAME).map(([k, n]) => `<span class="swatch" style="background:${AGENCY_COLOUR[k]}"></span>${n}`).join(" &nbsp; ");
-  el.insertAdjacentHTML("afterend", `<p class="small">${agencies}</p>`);
+  const flow = FLOW_STOPS.map(([v, c]) => `<span class="swatch" style="background:${c}"></span>${v}`).join(" ") + " vehicles/min";
+  el.insertAdjacentHTML("afterend", `<p class="small">${agencies}</p><p class="small">Camera rings, both directions, larger and darker with flow: ${flow}. Hollow grey: no stream or not sampled yet.</p>`);
+}
+
+function cameraCountsHtml(c) {
+  if (!c) return `<br><small>Not in the camera sampler's subset.</small>`;
+  if (c.status !== "ok") return `<br><b>Stream count:</b> ${c.status}${c.error ? ", " + c.error : ""}${c.sampled_at ? ", tried " + ageText(c.age_s) + " ago" : ""}`;
+  const dir = (d, way) => `${d.label} (${way}): <b>${d.count}</b> crossings in ${c.duration_s} s = <b>${d.vehicles_per_min}/min</b>, flow ${fmt(d.flow_px_s, " px/s")}, density ${d.density}`;
+  return `<br><b>Counted from the stream</b> ${c.sampled_at.replace("T", " ").slice(0, 19)} UTC, ${ageText(c.age_s)} ago<br>` +
+    `${dir(c.a, "down on screen")}<br>${dir(c.b, "up on screen")}<br>` +
+    `all boxes ${c.density_all} per frame, ${c.tracks} tracks; speed: ${c.speed_status === "calibrated" ? fmt(c.speed_kmh.a, " km/h") + " / " + fmt(c.speed_kmh.b, " km/h") : "not calibrated, none given"}<br>` +
+    `<small>${c.resolution} at ${c.fps} fps, ${c.frames} frames; ${c.model} (Ultralytics ${c.model_version}) on ${c.device}; decode ${c.decode_s} s, inference ${c.infer_s} s. Directions are sides of a fixed line, not route directions.</small>`;
 }
 
 function fmt(v, unit = "") { return v === null || v === undefined ? "–" : `${v}${unit}`; }
@@ -292,11 +340,14 @@ function wirePopups() {
   click("signs", (p) => `<b>Sign ${p.route} ${p.direction}</b>, ${p.location}<br>${p.text ? "<code>" + p.text + "</code>" : "<i>" + (p.display || "blank") + "</i>"}`);
   click("detectors", (p) => `<b>Caltrans detector ${p.station_id}</b> ${p.route} ${p.direction} pm ${fmt(p.postmile)}<br>${p.name}<br>` +
     (p.speed_kmh ? `<b>${p.speed_kmh} km/h</b> (${p.speed_mph} mph), ${p.volume_30s} vehicles per 30 s, code ${p.colour} ${p.colour_label}, ${ageText(p.age_s)} old` : `no data (code ${p.colour ?? "–"}), segment ${p.segment_id ?? "none"}`));
-  click("cameras", (p) => `<b>Caltrans camera ${p.cctv_id}</b> ${p.route} ${p.direction}<br>${p.name}<br>` +
-    (p.image_url ? `<img src="${p.image_url}?t=${Date.now()}" alt="camera still" loading="lazy"><small>still from Caltrans, refreshed every ${p.image_minutes} min</small>` : "no image URL"));
+  const cameraHtml = (p) => `<b>Caltrans camera ${p.cctv_id}</b> ${p.route} ${p.direction}<br>${p.name}<br>` +
+    (p.image_url ? `<img src="${p.image_url}?t=${Date.now()}" alt="camera still" loading="lazy"><small>still from Caltrans, refreshed every ${p.image_minutes ?? 2} min</small>` : "no image URL") +
+    cameraCountsHtml(cameraReadings[p.cctv_id]);
+  click("cameras", cameraHtml);
+  click("camera-counts", cameraHtml);
   click("stops", (p) => `<b>${p.stop_name}</b><br>${p.agency_name}, stop ${p.stop_id}`);
   click("shapes", (p) => `<b>${p.agency_name} ${p.route_short_name || p.route_id}</b> ${p.route_long_name}<br>shape ${p.shape_id}, direction ${p.direction_id}, ${p.trips} trips`);
-  for (const layer of ["vehicles", "incidents", "closures", "signs", "detectors", "cameras", "stops"]) {
+  for (const layer of ["vehicles", "incidents", "closures", "signs", "detectors", "cameras", "camera-counts", "stops"]) {
     map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
   }

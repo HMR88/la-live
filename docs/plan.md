@@ -36,7 +36,7 @@ A long-running process, started with Docker Compose next to Valhalla. Every cycl
 
 1. Fetch each feed. Decode protobuf with `gtfs-realtime-bindings` 3.0 (Apache 2); Metro over the WebSocket as JSON.
 2. For each vehicle, keep the previous position. Snap both to the vehicle's trip shape (known from the trip id), compute distance along the shape and elapsed time. Drop the pair if either point is within a stop's dwell window or the gap exceeds 2 minutes. The result is a speed observation on the segments between the two points.
-3. Read ATMS speeds per VDS, CHP incidents (parse the quoted XML and the LATLON encoding, drop truncated files by checking the closing tag), closures, signs.
+3. Read ATMS speeds per VDS, CHP incidents (parse the quoted XML and the LATLON encoding, parse the LACC dispatch block on its own because the server serves the file cut at about 150 KB in busy hours), closures, signs.
 4. Write a snapshot: `live/vehicles.geojson`, `live/segments.geojson` (speed, speed ratio, observation count, source, age), `live/events.geojson`, `live/cameras.geojson`. Append observations to a SQLite or Parquet history.
 5. Baseline: per segment, day of week and hour, the median speed over the last 4 to 8 weeks of observations. Colours are the ratio of current to baseline, the way Google does it, not absolute speed. Until the history exists the map shows absolute speed and says so.
 

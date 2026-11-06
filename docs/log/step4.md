@@ -7,7 +7,7 @@ Date: 2026-11-06, 05:30 to 06:20 UTC (2026-11-05, 21:30 to 22:20 Pacific, a Thur
 | Source | Fetch | Content | Finding |
 |---|---|---|---|
 | ATMS `webupdate.txt` | 200, 65 KB, 0.4 s | 2,128 VDS rows, 179 CMS rows, `### Created: Thu Nov  5 21:34:37 2026` | Live: the HTTP Last-Modified header matched the clock to the second and the Created line is Pacific local time. 271 of 2,128 rows had a speed. Deprecated by Caltrans, said so in `status.json`. |
-| CHP `sa.xml` | 200, 181 KB, 0.5 s | 17 dispatch centres, 138 logs, LACC has 32 | Parsed with ElementTree after checking the closing `</State>` tag. A copy cut at 131,072 bytes is rejected. |
+| CHP `sa.xml` | 200, 181 KB, 0.5 s | 17 dispatch centres, 138 logs, LACC has 32 | Parsed with ElementTree after checking the closing `</State>` tag. A copy cut at 131,072 bytes is rejected. Superseded on 2026-11-06, see the addendum. |
 | LCS `lcsStatusD07.json` | 200, 13.2 MB, 4.0 s | 4,317 closures | 591 current at fetch time, 12 of them with both ends in the corridor box. |
 | CMS `cmsStatusD07.json` | 200, 172 KB, 0.3 s | 145 signs | 23 in service in the box, 17 showing text (all "MOVE OVER OR / SLOW DOWN FOR / CRASH RESPONDERS"). |
 
@@ -69,3 +69,9 @@ Not verified: the colour code meanings beyond what the data shows; the "in effec
 Also fixed on the way: Python 3.13 skips `.pth` files whose name starts with an underscore, which is how hatchling names its editable hook, so `import poller` failed outside `python -m`. The build backend is now `uv_build`, which writes `la_live.pth`; `prep/step3_report.py` and `prep/step4_compare.py` run from the repository root again.
 
 Inherited: `speed_kmh` on a segment is the detector speed where one exists, the bus speed otherwise, with both kept side by side; the viewer should colour by `source`. The deprecated ATMS feed covers almost nothing of the Westside freeways; the cameras (step 7) are the only other freeway source. The 13 MB LCS file every 5 minutes is the heaviest fetch (4 s).
+
+## Addendum 2026-11-06: the CHP file is cut by its server in busy hours
+
+At 10:50 on a weekday the poller reported three CHP fetches, three errors, `sa.xml without closing </State> (truncated)`. Checked by hand: HEAD reports a Content-Length of 226,368 then 228,982 bytes with `Accept-Ranges: bytes`; every GET returns exactly 151,552 bytes (plain, with the F5 session cookie, gzip-encoded, HTTP/1.0); a Range request for bytes 150000 to 999999 returns 206 with 1,552 bytes, and any range starting past 151,552 returns 416. The cut is on the server side, not in transit, so no fetch strategy recovers the rest. The night-time file (181 KB at step 4) fitted under the cut, which is why 74 minutes then passed clean.
+
+Inside the cut file the Los Angeles dispatch block was whole (bytes 78,639 to 133,970 of 151,552, with its closing tag; the cut fell in the Orange County block that follows). `parse_chp` now parses the dispatch block on its own: the whole block when its closing tag is present, otherwise every `<Log>` element complete before the cut; it raises only when the block is absent. Live: 35 LACC logs from the cut file through `CachedSource.poll`, zero errors. Tests: a cut after the block loses nothing, a cut inside the block keeps the logs before it, a cut before the block is rejected (17 tests, pyright clean). What is still lost: nothing for LACC today; if the LA block itself ever runs past the cut, logs after the cut are dropped silently and the incident count will dip without an error in `status.json`.

@@ -82,12 +82,25 @@ def test_chp_parser_unquotes_values_decodes_latlon_and_filters_dispatch() -> Non
     assert len(parse_chp(SA_XML, dispatch="STCC")) == 1
 
 
-def test_chp_truncated_file_is_rejected() -> None:
-    truncated = SA_XML[: len(SA_XML) // 2]
-    with pytest.raises(ValueError):
-        parse_chp(truncated)
-    with pytest.raises(ValueError):
-        parse_chp(SA_XML.replace("</Center>\n", ""))  # closing State tag present but not well formed
+def test_chp_cut_file_still_yields_the_complete_dispatch_block() -> None:
+    """The CHP server serves sa.xml cut at about 150 KB in busy hours; the block of one
+    dispatch centre is parsed on its own, so a cut after its closing tag loses nothing."""
+    cut_after_lacc = SA_XML[: SA_XML.index("</Center>")]
+    assert [i.log_id for i in parse_chp(cut_after_lacc)] == ["261105LA2719"]
+    assert [i.log_id for i in parse_chp(SA_XML.replace("</Center>\n", ""))] == ["261105LA2719"]
+
+
+def test_chp_cut_inside_the_dispatch_block_keeps_the_logs_before_the_cut() -> None:
+    second = SA_XML[SA_XML.index('\t\t<Log ID = "261105LA2719">'): SA_XML.index("</Log>\n</Dispatch>\n</Center>") + len("</Log>\n")].replace("261105LA2719", "261105LA2720")
+    two_logs = SA_XML.replace("</Log>\n</Dispatch>\n</Center>", "</Log>\n" + second + "</Dispatch>\n</Center>")
+    assert [i.log_id for i in parse_chp(two_logs)] == ["261105LA2719", "261105LA2720"]
+    cut_mid_second = two_logs[: two_logs.index("261105LA2720") + 40]
+    assert [i.log_id for i in parse_chp(cut_mid_second)] == ["261105LA2719"]
+
+
+def test_chp_cut_before_the_dispatch_block_is_rejected() -> None:
+    with pytest.raises(ValueError, match="LACC"):
+        parse_chp(SA_XML[: SA_XML.index('<Dispatch ID = "LACC">')])
 
 
 def closure_item(cid: str, start: int, end: int | None, code1098: bool = False) -> dict:

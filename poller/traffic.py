@@ -147,30 +147,42 @@ def parse_latlon(value: str) -> tuple[float, float]:
     return -abs(int(lon_s)) / 1e6, int(lat_s) / 1e6
 
 
+_CHP_LOG = re.compile(r"<Log ID = .*?</Log>", re.S)
+
+
 def parse_chp(text: str, dispatch: str = "LACC") -> list[Incident]:
-    """All logs of one dispatch centre. Raises ValueError on a truncated file."""
-    if "</State>" not in text[-200:]:
-        raise ValueError("sa.xml without closing </State> (truncated)")
-    try:
-        root = ET.fromstring(text)
-    except ET.ParseError as exc:
-        raise ValueError(f"sa.xml does not parse: {exc}") from exc
+    """All complete logs of one dispatch centre.
+
+    The CHP server serves sa.xml cut at about 150 KB in busy hours (HEAD reports the
+    full length, GET and Range requests stop at the cut; 2026-11-06), so the document
+    as a whole is often not well formed. The dispatch block is parsed on its own:
+    whole when its closing tag is present, otherwise every log complete before the
+    cut. Raises ValueError when the block is not in the text at all.
+    """
+    opening = re.search(rf'<Dispatch ID = "{re.escape(dispatch)}">', text)
+    if opening is None:
+        raise ValueError(f"sa.xml without dispatch {dispatch} ({len(text):,} bytes; cut before it?)")
+    block = text[opening.end():]
+    close = block.find("</Dispatch>")
+    if close >= 0:
+        block = block[:close]
     out: list[Incident] = []
-    for disp in root.iter("Dispatch"):
-        if disp.get("ID", "").strip() != dispatch:
+    for fragment in _CHP_LOG.findall(block):
+        try:
+            log = ET.fromstring(fragment)
+        except ET.ParseError:
             continue
-        for log in disp.iter("Log"):
-            latlon = _unquote(log.find("LATLON"))
-            if not latlon or ":" not in latlon:
-                continue
-            lon, lat = parse_latlon(latlon)
-            try:
-                ts = _pacific_ts(_unquote(log.find("LogTime")), "%b %d %Y %I:%M%p")
-            except ValueError:
-                continue
-            details = tuple(_unquote(d.find("IncidentDetail")) for d in log.iter("details") if d.find("IncidentDetail") is not None)
-            out.append(Incident(log.get("ID", "").strip(), ts, _unquote(log.find("LogType")), _unquote(log.find("Location")),
-                                _unquote(log.find("LocationDesc")), _unquote(log.find("Area")), lon, lat, details))
+        latlon = _unquote(log.find("LATLON"))
+        if not latlon or ":" not in latlon:
+            continue
+        lon, lat = parse_latlon(latlon)
+        try:
+            ts = _pacific_ts(_unquote(log.find("LogTime")), "%b %d %Y %I:%M%p")
+        except ValueError:
+            continue
+        details = tuple(_unquote(d.find("IncidentDetail")) for d in log.iter("details") if d.find("IncidentDetail") is not None)
+        out.append(Incident(log.get("ID", "").strip(), ts, _unquote(log.find("LogType")), _unquote(log.find("Location")),
+                            _unquote(log.find("LocationDesc")), _unquote(log.find("Area")), lon, lat, details))
     return out
 
 

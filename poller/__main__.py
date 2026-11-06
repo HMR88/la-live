@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from collections import Counter
 from datetime import datetime, timezone
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +48,23 @@ def route_labels(base: BaseData) -> dict[tuple[str, str], str]:
     return out
 
 
-def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history: Path, feeds: list[Feed]) -> dict[str, Any]:
+SEED_KEEP_S = 900  # positions and pairs the next unattended job needs to pair across the gap
+
+
+def run_info(source: str, interval: float, cadence: float, minutes: float, started: int, env: Mapping[str, str]) -> dict[str, Any]:
+    """The 'run' block of status.json: where a snapshot comes from and how often a new one is expected.
+    On GitHub Actions the environment names the run; locally those fields are null."""
+    server, repo, run_id = env.get("GITHUB_SERVER_URL"), env.get("GITHUB_REPOSITORY"), env.get("GITHUB_RUN_ID")
+    return {
+        "source": source, "interval_s": interval, "cadence_s": cadence, "minutes": minutes, "started": _iso(started),
+        "run_id": run_id, "run_url": f"{server}/{repo}/actions/runs/{run_id}" if server and repo and run_id else None,
+        "sha": env.get("GITHUB_SHA"),
+    }
+
+
+def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history: Path, feeds: list[Feed],
+        source: str = "local", cadence: float | None = None, retain_days: float = 0) -> dict[str, Any]:
+    info = run_info(source, interval, cadence if cadence is not None else interval, minutes, int(time.time()), os.environ)
     base = load_base(base_dir)
     index = ShapeIndex.load(base_dir / "shape_index.json")
     engine = SpeedEngine(base, index)
@@ -107,7 +125,7 @@ def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history
         traffic_counts["detectors"] = write_detectors(live_dir / "detectors.geojson", base, atms, now)
         n_seg = write_segments(live_dir / "segments.geojson", base, store.segment_speeds(now - WINDOW_S), now)
         status: dict[str, Any] = {
-            "generated": _iso(now), "cycle": cycles, "interval_s": interval,
+            "generated": _iso(now), "cycle": cycles, "interval_s": interval, "run": info,
             "feeds": feed_status, "vehicles_in_snapshot": n_veh, "segments_in_snapshot": n_seg,
             "traffic_sources": {src.name: src.status(now) for src in (atms_src, chp_src, lcs_src, cms_src)},
             "traffic": traffic_counts,
@@ -125,6 +143,9 @@ def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history
         feed.close()
     for src in (atms_src, chp_src, lcs_src, cms_src):
         src.client.close()
+    if retain_days > 0:
+        deleted = store.prune(int(time.time()), SEED_KEEP_S, SEED_KEEP_S, int(retain_days * 86400))
+        print(f"pruned history: {deleted}, file {history.stat().st_size / 1e6:.1f} MB", flush=True)
     store.close()
     return status
 
@@ -144,6 +165,9 @@ def main() -> None:
     r.add_argument("--interval", type=float, default=30)
     r.add_argument("--live-dir", type=Path, default=Path("live"))
     r.add_argument("--history", type=Path, default=Path("history/observations.sqlite"))
+    r.add_argument("--source", default="local", choices=["local", "github-actions"], help="named in status.json so the viewer says where a snapshot came from")
+    r.add_argument("--cadence", type=float, default=None, help="expected seconds between snapshots (default: the interval; 300 on Actions)")
+    r.add_argument("--retain-days", type=float, default=0, help="after the run, keep this many days of observations and 15 min of positions and pairs; 0 keeps everything")
     args = ap.parse_args()
     if args.cmd == "build-index":
         base = load_base(args.base_dir)
@@ -151,7 +175,8 @@ def main() -> None:
         idx.save(args.base_dir / "shape_index.json")
         print(idx.summary())
     else:
-        run(args.minutes, args.interval, args.base_dir, args.live_dir, args.history, default_feeds())
+        run(args.minutes, args.interval, args.base_dir, args.live_dir, args.history, default_feeds(),
+            source=args.source, cadence=args.cadence, retain_days=args.retain_days)
 
 
 if __name__ == "__main__":

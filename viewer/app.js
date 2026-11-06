@@ -211,7 +211,14 @@ async function refreshStatus() {
   const rows = [];
   const gen = Date.parse(s.generated);
   const age = Math.round((Date.now() - gen) / 1000);
-  rows.push(`<tr><td>snapshot</td><td>${s.generated.replace("T", " ").slice(0, 19)} UTC, <span class="${age > 120 ? "warn" : "ok"}">${age} s old</span>, cycle ${s.cycle}</td></tr>`);
+  const run = s.run || { source: "local", interval_s: s.interval_s, cadence_s: s.interval_s };
+  const cadence = run.cadence_s ?? run.interval_s;
+  const slow = cadence > run.interval_s;
+  const where = run.source === "github-actions"
+    ? `GitHub Actions${run.run_url ? ` (<a href="${run.run_url}">run ${run.run_id}</a>)` : ""}, a new snapshot about every ${Math.round(cadence / 60)} min`
+    : `a local poller every ${run.interval_s} s`;
+  rows.push(`<tr><td>source</td><td class="${slow ? "warn" : ""}">${where}${slow ? "; vehicle positions are not live, they are up to the snapshot age old" : ""}</td></tr>`);
+  rows.push(`<tr><td>snapshot</td><td>${s.generated.replace("T", " ").slice(0, 19)} UTC, <span class="${age > cadence + 120 ? "warn" : "ok"}">${ageText(age)} old</span>, cycle ${s.cycle}</td></tr>`);
   for (const [name, f] of Object.entries(s.feeds)) {
     const label = { bbb: "Big Blue Bus", ccb: "Culver CityBus", ladot: "LADOT", metro_ws: "LA Metro (WebSocket)" }[name] || name;
     const err = f.errors ? `<span class="warn">${f.errors} errors</span>` : `<span class="ok">ok</span>`;

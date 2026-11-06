@@ -7,7 +7,10 @@ is refetched, and refuses paths outside the repository. With
 data: URL body and writes it under docs/img/, for the browser check in
 docs/log/step5.md. Nothing else is writable.
 
-Usage: uv run python serve.py [--port 8080] [--screenshots]
+Usage: uv run python serve.py [--port 8080] [--screenshots] [--root DIR --prefix /la-live]
+
+--root serves another folder (the staging folder of prep/publish.py) and --prefix mounts it under a URL
+path, to rehearse GitHub Pages' https://<user>.github.io/<repo>/ layout locally (docs/log/step8.md).
 """
 
 from __future__ import annotations
@@ -29,9 +32,19 @@ mimetypes.add_type("application/geo+json", ".geojson")
 
 class Handler(SimpleHTTPRequestHandler):
     screenshots = False
+    root = ROOT
+    prefix = ""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, directory=str(ROOT), **kwargs)  # type: ignore[arg-type]
+        super().__init__(*args, directory=str(self.root), **kwargs)  # type: ignore[arg-type]
+
+    def translate_path(self, path: str) -> str:
+        """With --prefix, only paths under it map to files, like a Pages project site under /<repo>/."""
+        if self.prefix:
+            if not path.split("?", 1)[0].startswith(self.prefix + "/"):
+                return str(self.root / "__outside_prefix__")
+            path = path[len(self.prefix):]
+        return super().translate_path(path)
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
@@ -39,6 +52,11 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_GET(self) -> None:
+        if self.prefix and self.path.split("?", 1)[0] == self.prefix:
+            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
+            self.send_header("Location", self.prefix + "/")
+            self.end_headers()
+            return
         path = Path(self.translate_path(self.path))
         rng = self.headers.get("Range")
         if rng is None or not path.is_file():
@@ -105,10 +123,14 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--screenshots", action="store_true")
+    ap.add_argument("--root", type=Path, default=ROOT, help="folder to serve (default: this repository)")
+    ap.add_argument("--prefix", default="", help="URL path the folder is mounted under, e.g. /la-live")
     args = ap.parse_args()
     Handler.screenshots = args.screenshots
+    Handler.root = args.root.resolve()
+    Handler.prefix = args.prefix.rstrip("/")
     httpd = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"serving {ROOT} at http://127.0.0.1:{args.port}/viewer/ (screenshots {'on' if args.screenshots else 'off'})", flush=True)
+    print(f"serving {Handler.root} at http://127.0.0.1:{args.port}{Handler.prefix}/viewer/ (screenshots {'on' if args.screenshots else 'off'})", flush=True)
     httpd.serve_forever()
 
 

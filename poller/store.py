@@ -57,5 +57,16 @@ class Store:
             "FROM observations WHERE ts >= ? AND weight > 0 GROUP BY segment_id, source", (since_ts,))
         return [(int(s), str(src), float(v), int(n), int(t)) for s, src, v, n, t in cur]
 
+    def prune(self, now: int, keep_positions_s: int, keep_pairs_s: int, keep_observations_s: int) -> dict[str, int]:
+        """Delete rows older than the windows and compact the file. Returns rows deleted per table.
+        The unattended job hands the file to the next run through a cache, so it keeps only the seed
+        (positions, pairs) and a window of observations; the local mode never calls this."""
+        deleted: dict[str, int] = {}
+        with self.conn:
+            for table, col, keep in (("positions", "ts", keep_positions_s), ("pairs", "ts1", keep_pairs_s), ("observations", "ts", keep_observations_s)):
+                deleted[table] = self.conn.execute(f"DELETE FROM {table} WHERE {col} < ?", (now - keep,)).rowcount
+        self.conn.execute("VACUUM")
+        return deleted
+
     def close(self) -> None:
         self.conn.close()

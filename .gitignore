@@ -6,6 +6,7 @@ __pycache__/
 
 # Data that is downloaded or generated (the README says how to rebuild it)
 data/downloads/
+data/base/
 data/valhalla/
 data/tiles/
 live/

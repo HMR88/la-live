@@ -1,0 +1,64 @@
+{
+ "run_id": "20261105-141314-la-corridor-base-layers",
+ "run_dir": "/Users/hmr88/Documents/GitHub/QGIS/runs/20261105-141314-la-corridor-base-layers",
+ "copied_utc": "2026-11-06T01:18:47+00:00",
+ "files": {
+  "segments.gpkg": {
+   "source": "steps/segments.gpkg",
+   "bytes": 13709312,
+   "sha256": "07c5c00ca877632d83c30e32ee188e7d066d09f7096670e8113d03ddc27f5b28"
+  },
+  "shapes.gpkg": {
+   "source": "steps/shapes.gpkg",
+   "bytes": 6352896,
+   "sha256": "92302b5da385a6345100cfed77634ec2d397b4dc7566b4ce25cd9ff184e9572a"
+  },
+  "stops.gpkg": {
+   "source": "steps/stops.gpkg",
+   "bytes": 1744896,
+   "sha256": "9b7ca2fe947e0a1e72d79ae7fca6fbfe3274a72c83d77f92ad3888a7984191e3"
+  },
+  "detectors.gpkg": {
+   "source": "steps/detectors.gpkg",
+   "bytes": 188416,
+   "sha256": "ea30453b3274a2862947fe69a9ec1ffbb9fbe5c0c745d411e4f7823ddbf66ec0"
+  },
+  "cameras.gpkg": {
+   "source": "steps/cameras.gpkg",
+   "bytes": 159744,
+   "sha256": "1c21c868b001866b6298c5d9ab031b7f0936c5b77b9c28f3194e7eb087de0ef1"
+  },
+  "corridor.pmtiles": {
+   "source": "steps/corridor.pmtiles",
+   "bytes": 11562971,
+   "sha256": "4c78859b9428f06b280b4985a60fe8eb75595b579ca6c0b28b104fec25b18db5"
+  },
+  "gtfs_metro_bus.gpkg": {
+   "source": "prep/gtfs_metro_bus__gtfs.gpkg",
+   "bytes": 12939264,
+   "sha256": "c6d74abd668a2acefcb74a1d4cf856a8df70d6f22bbb67d493209ba3738feeb7"
+  },
+  "gtfs_bigbluebus.gpkg": {
+   "source": "prep/gtfs_bigbluebus__gtfs.gpkg",
+   "bytes": 806912,
+   "sha256": "604db462e091aff996d941600bce6290f6635f32043f8219f2800caefa5e1db3"
+  },
+  "gtfs_culvercity.gpkg": {
+   "source": "prep/gtfs_culvercity__gtfs.gpkg",
+   "bytes": 937984,
+   "sha256": "ad70c57de7dfb87a19738ad17a9e03f42ab4c8d71a96571daf6062a089c32d90"
+  },
+  "gtfs_ladot.gpkg": {
+   "source": "prep/gtfs_ladot__gtfs.gpkg",
+   "bytes": 1728512,
+   "sha256": "13cc3f769aeca2cd534a65fb6801e8f4fbf4c3249c42848bb3208f829c7d5e11"
+  },
+  "buildings.pmtiles": {
+   "source": "prep/corridor_osm__osm.gpkg:buildings",
+   "bytes": 37637860,
+   "sha256": "3a2b18a7e8abc5e94361c1a40b2ecbf07af67698e243a72284de91cbaabb8b6b",
+   "seconds": 37.8,
+   "sql": "SELECT geom, height, levels, ROUND(CASE WHEN height IS NOT NULL AND CAST(height AS REAL) > 0 THEN CASE WHEN height LIKE '%ft%' OR height LIKE '%''%' THEN CAST(height AS REAL) * 0.3048 ELSE CAST(height AS REAL) END WHEN levels IS NOT NULL AND CAST(levels AS REAL) > 0 THEN CAST(levels AS REAL) * 3.5 ELSE 8 END, 1) AS height_m FROM buildings"
+  }
+ }
+}

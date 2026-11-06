@@ -69,7 +69,10 @@ class Handler(SimpleHTTPRequestHandler):
                 chunk = f.read(min(1 << 20, remaining))
                 if not chunk:
                     break
-                self.wfile.write(chunk)
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    return  # the browser dropped the tile request while panning; nothing to report
                 remaining -= len(chunk)
 
     def do_POST(self) -> None:

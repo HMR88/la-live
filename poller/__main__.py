@@ -17,11 +17,24 @@ from poller.base import BaseData, load_base
 from poller.feeds import Feed, MetroWebSocketFeed, default_feeds
 from poller.model import Observation, PairResult, SegmentSpeed
 from poller.shape_index import ShapeIndex, build_index
-from poller.snapshot import write_segments, write_status, write_vehicles
+from poller.snapshot import write_detectors, write_events, write_segments, write_status, write_vehicles
 from poller.speed import SpeedEngine
 from poller.store import Store
+from poller.traffic import AtmsSnapshot, default_sources, in_bbox
 
 WINDOW_S = 600
+
+
+def detector_rows(base: BaseData, atms: AtmsSnapshot) -> list[SegmentSpeed]:
+    """Valid detector readings on stations that have a segment, one row each.
+    ts is the file's Created time, so an unchanged file adds nothing."""
+    out: list[SegmentSpeed] = []
+    for sid, r in atms.readings.items():
+        d = base.detectors.get(sid)
+        if d is None or d.segment_id is None or not r.valid:
+            continue
+        out.append(SegmentSpeed(atms.created_ts, d.segment_id, "vds", r.speed_kmh, 1.0, str(sid), "caltrans"))
+    return out
 
 
 def route_labels(base: BaseData) -> dict[tuple[str, str], str]:
@@ -43,6 +56,8 @@ def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history
     print(f"base: {len(base.segments)} segments, {len(base.shapes)} shapes; index {index.summary()}; "
           f"seeded {len(engine.state)} vehicles from history", flush=True)
     feed_status: dict[str, dict[str, Any]] = {f.name: {"errors": 0, "last_error": None} for f in feeds}
+    atms_src, chp_src, lcs_src, cms_src = default_sources()
+    traffic_counts: dict[str, Any] = {}
     reasons: Counter[str] = Counter()
     per_agency_vehicles: dict[str, set[str]] = {}
     cycles = 0
@@ -74,24 +89,42 @@ def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history
                 pairs.append(result)
                 reasons[result.reason] += 1
                 rows.extend(seg_rows)
+        atms = atms_src.poll(now)
+        if atms is not None:
+            vds_rows = detector_rows(base, atms)
+            rows.extend(vds_rows)
+            traffic_counts["atms"] = {"created_ts": atms.created_ts, "age_s": now - atms.created_ts, "stations_in_feed": len(atms.readings),
+                                      "valid_readings": sum(1 for r in atms.readings.values() if r.valid),
+                                      "corridor_stations_with_speed": sum(1 for sid, r in atms.readings.items() if r.valid and sid in base.detectors),
+                                      "rows_to_segments": len(vds_rows), "note": "deprecated feed, still live"}
+        incidents = [i for i in (chp_src.poll(now) or []) if in_bbox(i.lon, i.lat)]
+        closures = [c for c in (lcs_src.poll(now) or []) if c.is_current(now) and in_bbox(c.lon0, c.lat0) and in_bbox(c.lon1, c.lat1)]
+        signs = [sg for sg in (cms_src.poll(now) or []) if sg.in_service and in_bbox(sg.lon, sg.lat)]
         store.write(positions, pairs, rows)
         cycles += 1
         n_veh = write_vehicles(live_dir / "vehicles.geojson", engine.state, now, labels)
+        traffic_counts["events"] = write_events(live_dir / "events.geojson", incidents, closures, signs, now)
+        traffic_counts["detectors"] = write_detectors(live_dir / "detectors.geojson", base, atms, now)
         n_seg = write_segments(live_dir / "segments.geojson", base, store.segment_speeds(now - WINDOW_S), now)
         status: dict[str, Any] = {
             "generated": _iso(now), "cycle": cycles, "interval_s": interval,
             "feeds": feed_status, "vehicles_in_snapshot": n_veh, "segments_in_snapshot": n_seg,
+            "traffic_sources": {src.name: src.status(now) for src in (atms_src, chp_src, lcs_src, cms_src)},
+            "traffic": traffic_counts,
             "pairs_by_reason": dict(reasons),
             "vehicles_seen": {a: len(v) for a, v in per_agency_vehicles.items()},
         }
         write_status(live_dir / "status.json", status)
         print(f"cycle {cycles} {_iso(now)}: new positions {len(positions)}, kept {reasons['kept']}, "
-              f"segments {n_seg}, vehicles {n_veh}, reasons {dict(reasons)}", flush=True)
+              f"segments {n_seg}, vehicles {n_veh}, vds rows {len([r for r in rows if r.source == 'vds'])}, "
+              f"events {traffic_counts.get('events')}, reasons {dict(reasons)}", flush=True)
         if time.monotonic() >= deadline:
             break
         time.sleep(max(0.0, interval - (time.monotonic() - t0)))
     for feed in feeds:
         feed.close()
+    for src in (atms_src, chp_src, lcs_src, cms_src):
+        src.client.close()
     store.close()
     return status
 

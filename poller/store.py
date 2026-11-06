@@ -50,12 +50,12 @@ class Store:
             "WHERE ts = (SELECT MAX(ts) FROM positions q WHERE q.agency = p.agency AND q.vehicle_id = p.vehicle_id)")
         return [Observation(a, v, trip, route, ts, lon, lat, bearing) for a, v, ts, lon, lat, trip, route, bearing in cur]
 
-    def segment_speeds(self, since_ts: int) -> list[tuple[int, float, int, int]]:
-        """(segment_id, length-weighted mean speed, n observations, latest ts) since since_ts."""
+    def segment_speeds(self, since_ts: int) -> list[tuple[int, str, float, int, int]]:
+        """(segment_id, source, weighted mean speed, n observations, latest ts) since since_ts."""
         cur = self.conn.execute(
-            "SELECT segment_id, SUM(speed_kmh * weight) / SUM(weight), COUNT(*), MAX(ts) "
-            "FROM observations WHERE ts >= ? AND weight > 0 GROUP BY segment_id", (since_ts,))
-        return [(int(s), float(v), int(n), int(t)) for s, v, n, t in cur]
+            "SELECT segment_id, source, SUM(speed_kmh * weight) / SUM(weight), COUNT(*), MAX(ts) "
+            "FROM observations WHERE ts >= ? AND weight > 0 GROUP BY segment_id, source", (since_ts,))
+        return [(int(s), str(src), float(v), int(n), int(t)) for s, src, v, n, t in cur]
 
     def close(self) -> None:
         self.conn.close()

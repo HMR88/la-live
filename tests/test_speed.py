@@ -100,7 +100,7 @@ def test_store_is_idempotent(tmp_path: Path) -> None:
     latest = store.latest_positions()
     assert len(latest) == 1 and latest[0].ts == 1030
     speeds = store.segment_speeds(0)
-    assert sorted((s, round(v, 1), n) for s, v, n, _ in speeds) == [(1, 36.0, 1), (2, 36.0, 1)]
+    assert sorted((s, src, round(v, 1), n) for s, src, v, n, _ in speeds) == [(1, "bus", 36.0, 1), (2, "bus", 36.0, 1)]
     # a restarted engine seeded from the store continues the trace without a duplicate pair
     eng2 = SpeedEngine(base, idx)
     eng2.seed(latest)

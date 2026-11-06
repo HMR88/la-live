@@ -14,7 +14,7 @@ from pyogrio.raw import read
 from shapely.geometry import LineString, MultiLineString, Point
 from shapely.strtree import STRtree
 
-from poller.model import AGENCY_BY_NAME
+from poller.model import AGENCY_BY_NAME, TO_WGS
 
 GTFS_FILES = {
     "metro": "gtfs_metro_bus.gpkg",
@@ -58,12 +58,25 @@ class Stop:
     geom: Point  # EPSG:32611
 
 
+@dataclass(frozen=True)
+class Detector:
+    station_id: int
+    segment_id: int | None  # None when step 2 found no freeway segment for it
+    lon: float
+    lat: float
+    route: str
+    direction: str
+    postmile: float | None
+    name: str
+
+
 @dataclass
 class BaseData:
     segments: dict[int, Segment]
     shapes: dict[str, Shape]  # by Shape.key
     stops: list[Stop]
     trips: dict[tuple[str, str], tuple[str, str]]  # (agency, trip_id) -> (shape_id, route_id)
+    detectors: dict[int, Detector] = field(default_factory=dict)
     segments_by_osm: dict[int, list[int]] = field(default_factory=dict)
     shapes_by_route: dict[tuple[str, str], list[str]] = field(default_factory=dict)  # (agency, route_id) -> keys
     shapes_by_short_name: dict[tuple[str, str], list[str]] = field(default_factory=dict)
@@ -155,4 +168,28 @@ def load_base(base_dir: Path = Path("data/base")) -> BaseData:
         for i in range(len(tab["trip_id"])):
             trips[(agency, str(tab["trip_id"][i]))] = (str(tab["shape_id"][i]), str(tab["route_id"][i]))
 
-    return BaseData(segments=segments, shapes=shapes, stops=stops, trips=trips)
+    detectors = load_detectors(base_dir / "detectors.gpkg") if (base_dir / "detectors.gpkg").exists() else {}
+    return BaseData(segments=segments, shapes=shapes, stops=stops, trips=trips, detectors=detectors)
+
+
+def _float_or_none(v: object) -> float | None:
+    try:
+        f = float(str(v))
+    except (TypeError, ValueError):
+        return None
+    return None if f != f else f  # NaN
+
+
+def load_detectors(path: Path) -> dict[int, Detector]:
+    tab, geoms = _columns(path, None, ["station_id", "seg_segment_id", "route", "direction", "postmile", "name"], True)
+    out: dict[int, Detector] = {}
+    for i, wkb in enumerate(geoms):
+        g = shapely.from_wkb(wkb)
+        if not isinstance(g, Point):
+            continue
+        lon, lat = TO_WGS.transform(g.x, g.y)
+        seg = _float_or_none(tab["seg_segment_id"][i])
+        sid = int(str(tab["station_id"][i]))
+        out[sid] = Detector(sid, None if seg is None else int(seg), float(lon), float(lat), str(tab["route"][i]),
+                            str(tab["direction"][i] or ""), _float_or_none(tab["postmile"][i]), str(tab["name"][i] or ""))
+    return out

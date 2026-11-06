@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LA live corridor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+<aside id="panel">
+  <header>
+    <h1>LA live: Westside to downtown</h1>
+    <p class="sub">Transit and traffic from open feeds on OpenStreetMap roads. <span id="clock"></span></p>
+  </header>
+  <section>
+    <h2>Feeds</h2>
+    <table id="feeds"><tbody><tr><td>loading status.json</td></tr></tbody></table>
+  </section>
+  <section>
+    <h2>Layers</h2>
+    <div id="toggles"></div>
+    <button id="pitch">Go flat</button>
+  </section>
+  <section>
+    <h2>Legend: speed, km/h</h2>
+    <div class="legend" id="legend"></div>
+    <p class="small">Grey: no reading in the last 10 minutes. Roads thicker by class. Width and colour join <code>live/segments.geojson</code> to the road tiles by <code>segment_id</code>.</p>
+  </section>
+  <details>
+    <summary>Assumptions and method</summary>
+    <ul class="small">
+      <li>Road colours are absolute speeds, not a ratio to a baseline (that is step 6 of the plan).</li>
+      <li>Where a Caltrans detector sits on a segment, its speed is shown (cars, deprecated ATMS feed). Elsewhere the colour is the speed of buses between stops: pairs of vehicle positions 30 s apart projected onto the route shape, with pairs near a stop, under 20 m, over 120 s apart or over 110 km/h dropped. Buses are slower than cars; a bus segment at 20 km/h is normal.</li>
+      <li>A segment's value is the length-weighted mean of the last 10 minutes. Hover a road to see the source (bus, vds, both) and both speeds.</li>
+      <li>Vehicles: positions as the agencies publish them, up to 5 minutes old, LA Metro over its WebSocket, others polled every 30 s.</li>
+      <li>Events: CHP incidents of the Los Angeles dispatch, Caltrans lane closures current now, in-service message signs. Camera stills come from Caltrans when a popup opens; nothing is proxied.</li>
+      <li>Terrain is the AWS Terrain Tiles DEM with 1.3 times exaggeration. Buildings are OSM footprints extruded by <code>height</code>, else levels times 3.5 m, else 8 m.</li>
+    </ul>
+  </details>
+  <details>
+    <summary>Attribution</summary>
+    <ul class="small" id="attribution">
+      <li>Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>, ODbL. Basemap tiles by <a href="https://openfreemap.org">OpenFreeMap</a>, <a href="https://www.openmaptiles.org/">© OpenMapTiles</a>.</li>
+      <li>Transit data provided by LA Metro, reproduced unmodified, not used in advertising.</li>
+      <li>City of Santa Monica Big Blue Bus, ODC-By 1.0.</li>
+      <li><strong>LADOT Transit information provided on this site is subject to change without notice. For the most current information, go to ladottransit.com.</strong></li>
+      <li>Culver CityBus.</li>
+      <li>Caltrans District 7 detector, closure, sign and camera feeds; public domain unless indicated, camera images may carry additional rights, no warranty of accuracy. The detector feed is deprecated by Caltrans.</li>
+      <li>California Highway Patrol incident feed.</li>
+      <li>Terrain: <a href="https://registry.opendata.aws/terrain-tiles/">Terrain Tiles</a> (Mapzen, Linux Foundation). United States 3DEP (formerly NED) and global GMTED2010 and SRTM terrain data courtesy of the U.S. Geological Survey; global ETOPO1 terrain data U.S. National Oceanic and Atmospheric Administration. Attribution per <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md">joerd attribution.md</a>.</li>
+      <li>Road extract by <a href="https://www.geofabrik.de/">Geofabrik</a>. Routing and matching by <a href="https://valhalla.github.io/valhalla/">Valhalla</a>. Map by <a href="https://maplibre.org/">MapLibre GL JS</a> with <a href="https://github.com/protomaps/PMTiles">PMTiles</a>.</li>
+    </ul>
+  </details>
+  <p class="small"><a href="https://github.com/HMR88/la-live">la-live</a>, AGPL-3.0.</p>
+</aside>
+<script src="https://unpkg.com/pmtiles@4.5.0/dist/pmtiles.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

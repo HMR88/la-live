@@ -3,6 +3,8 @@
 // build imports a bare "fflate" a browser cannot resolve). No build step.
 // Coordinates everywhere are WGS84 lon/lat (EPSG:4326), as MapLibre expects.
 import * as maplibregl from "https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs";
+import { speedParts, durationText, relativeAge, pacificTime, pacificDateTime, roadClassName, parseLimitMph, limitComparison,
+  sourceText, headingText, freshness, modeLabel, plural, rampColour } from "./format.js";
 const pmtiles = window.pmtiles;
 
 const BASE = new URL("..", location.href).href; // repository root as served by serve.py
@@ -21,7 +23,7 @@ const REFRESH_MS = 30000;
 const CORRIDOR = [[-118.52, 33.98], [-118.22, 34.09]];
 const AGENCY_COLOUR = { metro: "#e4572e", bbb: "#1f5fbf", ccb: "#2a9d8f", ladot: "#8e44ad" };
 const AGENCY_NAME = { metro: "LA Metro", bbb: "Big Blue Bus", ccb: "Culver CityBus", ladot: "LADOT" };
-// Absolute km/h ramp for roads and detectors. Step 6 replaces it with a ratio to baseline.
+// Absolute km/h ramp for roads and detectors (the data is km/h; the legend labels it in mph). Step 6 replaces it with a ratio to baseline.
 const SPEED_STOPS = [[0, "#7f0000"], [15, "#d7301f"], [30, "#fc8d59"], [45, "#fee08b"], [60, "#a6d96a"], [80, "#1a9850"], [100, "#00441b"]];
 
 const protocol = new pmtiles.Protocol();
@@ -41,7 +43,7 @@ const map = new maplibregl.Map({
 });
 window.lamap = map; // for the browser console and the step 5 check
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
-map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
+map.addControl(new maplibregl.ScaleControl({ unit: "imperial" }), "bottom-right");
 
 function speedRamp(value) {
   const stops = SPEED_STOPS.flat();
@@ -205,60 +207,90 @@ async function refreshSegments() {
   return { count: fc.features.length, generated: fc.generated };
 }
 
+let latestStatus = null; // the last status.json, for the pill's clock tick between fetches
+
+function dot(kind) { return `<span class="dot ${kind}"></span>`; }
+function row(kind, name, figure, title = "") { return `<li title="${title}">${dot(kind)}<span class="name">${name}</span><span class="figure">${figure}</span></li>`; }
+function set(id, html) { document.getElementById(id).innerHTML = html; }
+
 async function refreshStatus() {
   const r = await fetch(LIVE.status + "?t=" + Date.now(), { cache: "no-store" });
   const s = await r.json();
-  const rows = [];
-  const gen = Date.parse(s.generated);
-  const age = Math.round((Date.now() - gen) / 1000);
+  latestStatus = s;
+  renderPill();
+  const feedNames = { bbb: "Big Blue Bus", ccb: "Culver CityBus", ladot: "LADOT", metro_ws: "LA Metro" };
+  const transit = Object.entries(s.feeds).map(([name, f]) => {
+    const kind = f.errors ? (f.in_corridor ? "warn" : "bad") : "ok";
+    return row(kind, feedNames[name] || name, plural(f.in_corridor ?? 0, "bus", "buses") + " in corridor",
+      `${f.in_corridor ?? 0} of ${f.vehicles ?? 0} vehicles inside the corridor, ${f.errors} fetch errors`);
+  });
+  set("rows-transit", transit.join(""));
+
+  const src = s.traffic_sources || {}, tr = s.traffic || {}, ev = tr.events || {};
+  const srcKind = (k) => (src[k]?.errors ? (src[k].age_s > 900 ? "bad" : "warn") : src[k] ? "ok" : "unknown");
+  const traffic = [
+    row(srcKind("atms"), "Detectors", tr.atms ? plural(tr.atms.corridor_stations_with_speed, "station") + " reporting" : "no data", "Caltrans ATMS speed detectors with a reading in the corridor"),
+    row(srcKind("chp"), "Incidents", plural(ev.incidents ?? 0, "incident"), "CHP incidents of the Los Angeles dispatch inside the corridor"),
+    row(srcKind("lcs"), "Closures", plural(ev.closures ?? 0, "lane closure"), "Caltrans lane closures current now"),
+    row(srcKind("cms"), "Signs", plural(ev.signs ?? 0, "sign") + " in service", "Caltrans changeable message signs"),
+  ];
+  set("rows-traffic", traffic.join(""));
+
   const run = s.run || { source: "local", interval_s: s.interval_s, cadence_s: s.interval_s };
-  const cadence = run.cadence_s ?? run.interval_s;
-  const slow = cadence > run.interval_s;
-  const where = run.source === "github-actions"
-    ? `GitHub Actions${run.run_url ? ` (<a href="${run.run_url}">run ${run.run_id}</a>)` : ""}, a new snapshot about every ${Math.round(cadence / 60)} min`
-    : `a local poller every ${run.interval_s} s`;
-  rows.push(`<tr><td>source</td><td class="${slow ? "warn" : ""}">${where}${slow ? "; vehicle positions are not live, they are up to the snapshot age old" : ""}</td></tr>`);
-  rows.push(`<tr><td>snapshot</td><td>${s.generated.replace("T", " ").slice(0, 19)} UTC, <span class="${age > cadence + 120 ? "warn" : "ok"}">${ageText(age)} old</span>, cycle ${s.cycle}</td></tr>`);
-  for (const [name, f] of Object.entries(s.feeds)) {
-    const label = { bbb: "Big Blue Bus", ccb: "Culver CityBus", ladot: "LADOT", metro_ws: "LA Metro (WebSocket)" }[name] || name;
-    const err = f.errors ? `<span class="warn">${f.errors} errors</span>` : `<span class="ok">ok</span>`;
-    rows.push(`<tr><td>${label}</td><td>${f.in_corridor ?? 0} of ${f.vehicles ?? 0} vehicles in the corridor, ${err}</td></tr>`);
-  }
-  for (const [name, src] of Object.entries(s.traffic_sources || {})) {
-    const label = { atms: "Caltrans detectors (ATMS)", chp: "CHP incidents", lcs: "Caltrans closures", cms: "Caltrans signs" }[name] || name;
-    const err = src.errors ? `<span class="warn">${src.errors} errors</span>` : `<span class="ok">ok</span>`;
-    const extra = name === "atms" && s.traffic?.atms
-      ? `, ${s.traffic.atms.corridor_stations_with_speed} corridor stations with a speed. <span class="warn">Feed deprecated by Caltrans, still live.</span>` : "";
-    const ev = name !== "atms" && s.traffic?.events ? `, ${s.traffic.events[{ chp: "incidents", lcs: "closures", cms: "signs" }[name]] ?? ""} in the corridor` : "";
-    rows.push(`<tr><td>${label}</td><td>last good copy ${src.age_s ?? "?"} s old, ${err}${extra}${ev}</td></tr>`);
-  }
   const pr = s.pairs_by_reason || {};
-  rows.push(`<tr><td>bus pairs</td><td>${pr.kept ?? 0} kept of ${Object.values(pr).reduce((a, b) => a + b, 0)} since start; ${s.segments_in_snapshot} segments with a speed in the last 10 min</td></tr>`);
-  document.querySelector("#feeds tbody").innerHTML = rows.join("");
+  const total = Object.values(pr).reduce((a, b) => a + b, 0);
+  const details = [
+    ["Snapshot", `${pacificDateTime(s.generated)} (${s.generated.slice(11, 19)} UTC), cycle ${s.cycle}`],
+    ["Mode", run.source === "github-actions"
+      ? `GitHub Actions, a ${run.minutes} min run every ${Math.round((run.cadence_s ?? 300) / 60)} min${run.run_url ? `, <a href="${run.run_url}">run ${run.run_id}</a>` : ""}`
+      : `local poller, a cycle every ${run.interval_s ?? s.interval_s} s`],
+    ["Roads with a speed", `${s.segments_in_snapshot} segments in the last 10 min`],
+    ["Bus pairs", `${pr.kept ?? 0} kept of ${total} since start`],
+    ...Object.entries(s.feeds).map(([name, f]) => [feedNames[name] || name,
+      `${f.in_corridor ?? 0} of ${f.vehicles ?? 0} vehicles in corridor${f.errors ? `, <span class="warn-text">${f.errors} errors: ${f.last_error || ""}</span>` : ""}${f.messages ? `, ${f.messages.toLocaleString()} WebSocket messages` : ""}`]),
+    ...Object.entries(src).map(([name, x]) => [{ atms: "Detector feed", chp: "CHP feed", lcs: "Closure feed", cms: "Sign feed" }[name] || name,
+      `last good copy ${relativeAge(x.age_s)}, every ${x.interval_s} s${x.errors ? `, <span class="warn-text">${x.errors} errors</span>` : ""}` +
+      (name === "atms" ? `. <span class="warn-text">Deprecated by Caltrans, still live.</span>` : "")]),
+  ];
+  set("detail-rows", details.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join(""));
 }
+
+function renderPill() {
+  const s = latestStatus;
+  if (!s) return;
+  const age = Math.round((Date.now() - Date.parse(s.generated)) / 1000);
+  const mode = modeLabel(s.run, s.interval_s);
+  document.querySelector("#pill .dot").className = "dot " + freshness(age);
+  document.getElementById("pill-text").textContent = mode.text;
+  const ageEl = document.getElementById("pill-age");
+  ageEl.textContent = relativeAge(age);
+  ageEl.title = `snapshot written ${pacificDateTime(s.generated)}`;
+  document.getElementById("pill").title = mode.kind === "scheduled"
+    ? "Snapshots come from a scheduled job; vehicle positions are as old as the snapshot."
+    : "A local poller writes a new snapshot every cycle; the page refetches every 30 s.";
+}
+setInterval(renderPill, 5000);
 
 async function refreshCameras() {
   const r = await fetch(LIVE.camera_counts + "?t=" + Date.now(), { cache: "no-store" });
-  const row = document.getElementById("cameras-row") || document.querySelector("#feeds tbody").appendChild(document.createElement("tr"));
-  row.id = "cameras-row";
   if (!r.ok) {
     map.getSource("camera_counts").setData({ type: "FeatureCollection", features: [] });
     cameraReadings = {};
-    row.innerHTML = `<td>camera sampler</td><td class="warn">live/cameras.geojson not found (sampler not run)</td></tr>`;
+    set("rows-cameras", row("unknown", "Camera counts", "sampler not running", "live/cameras.geojson is missing"));
     return;
   }
   const fc = await r.json();
   map.getSource("camera_counts").setData(fc);
   cameraReadings = Object.fromEntries(fc.features.map((f) => [f.properties.cctv_id, f.properties]));
   const ok = fc.features.filter((f) => f.properties.status === "ok");
-  const ages = fc.features.map((f) => f.properties.age_s).filter((a) => a !== null && a !== undefined);
+  // age from sampled_at, not the file's age_s, which is frozen at write time
+  const ages = fc.features.map((f) => f.properties.sampled_at).filter(Boolean).map((t) => Math.round((Date.now() - Date.parse(t)) / 1000));
   const newest = ages.length ? Math.min(...ages) : null;
-  row.innerHTML = `<td>camera sampler</td><td>${ok.length} of ${fc.features.length} cameras counted, newest sample ` +
-    `<span class="${newest === null || newest > 900 ? "warn" : "ok"}">${ageText(newest)} old</span>; ${fc.note || ""}</td>`;
+  const kind = newest === null ? "unknown" : newest < 900 ? "ok" : newest < 3600 ? "warn" : "bad";
+  set("rows-cameras", row(kind, "Cameras counted", `${ok.length} of ${fc.features.length}, newest ${relativeAge(newest)}`, fc.note || ""));
 }
 
 async function refresh() {
-  document.getElementById("clock").textContent = new Date().toISOString().slice(11, 19) + " UTC";
   try {
     for (const name of ["vehicles", "events", "detectors"]) map.getSource(name).setData(LIVE[name] + "?t=" + Date.now());
     await refreshSegments();
@@ -266,95 +298,172 @@ async function refresh() {
     await refreshCameras();
   } catch (err) {
     console.error("refresh failed", err);
-    document.querySelector("#feeds tbody").innerHTML = `<tr><td class="warn">live files not reachable: ${err}</td></tr>`;
+    document.querySelector("#pill .dot").className = "dot bad";
+    document.getElementById("pill-text").textContent = "Live files not reachable";
+    document.getElementById("pill-age").textContent = "";
   }
 }
 
+// The panel collapses to its header and status pill on phone widths, before the map has loaded.
+function wireCollapse() {
+  const panel = document.getElementById("panel"), btn = document.getElementById("collapse");
+  const setCollapsed = (c) => { panel.classList.toggle("collapsed", c); btn.setAttribute("aria-expanded", String(!c)); btn.title = c ? "Expand the panel" : "Collapse the panel"; };
+  btn.addEventListener("click", () => setCollapsed(!panel.classList.contains("collapsed")));
+  if (window.matchMedia("(max-width: 480px)").matches) setCollapsed(true);
+}
+wireCollapse();
+
 function buildToggles() {
-  const groups = { Roads: ["roads"], Vehicles: ["vehicles", "vehicle-labels"], Shapes: ["shapes"], Stops: ["stops"],
+  const groups = { Roads: ["roads"], Buses: ["vehicles", "vehicle-labels"], Routes: ["shapes"], Stops: ["stops"],
     Events: ["closures", "closure-points", "signs", "incidents", "incident-labels"], Detectors: ["detectors"], Cameras: ["cameras", "camera-labels"], "Camera counts": ["camera-counts"],
     Buildings: ["buildings-3d"], Hillshade: ["hillshade"] };
   const box = document.getElementById("toggles");
-  for (const [label, ids] of Object.entries(groups)) {
-    const el = document.createElement("label");
-    const cb = document.createElement("input");
-    cb.type = "checkbox"; cb.checked = true;
-    cb.addEventListener("change", () => ids.forEach((id) => map.setLayoutProperty(id, "visibility", cb.checked ? "visible" : "none")));
-    el.append(cb, " " + label);
-    box.append(el);
-  }
-  const terrain = document.createElement("label");
-  const tcb = document.createElement("input");
-  tcb.type = "checkbox"; tcb.checked = true;
-  tcb.addEventListener("change", () => map.setTerrain(tcb.checked ? { source: "dem", exaggeration: 1.3 } : null));
-  terrain.append(tcb, " Terrain");
-  box.append(terrain);
-  const btn = document.getElementById("pitch");
-  btn.addEventListener("click", () => {
+  const chip = (label, on, onClick) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (on ? " on" : ""); b.textContent = label; b.type = "button"; b.setAttribute("aria-pressed", String(on));
+    b.addEventListener("click", () => { const now = !b.classList.contains("on"); b.classList.toggle("on", now); b.setAttribute("aria-pressed", String(now)); onClick(now); });
+    box.append(b);
+    return b;
+  };
+  for (const [label, ids] of Object.entries(groups)) chip(label, true, (on) => ids.forEach((id) => map.setLayoutProperty(id, "visibility", on ? "visible" : "none")));
+  chip("Terrain", true, (on) => map.setTerrain(on ? { source: "dem", exaggeration: 1.3 } : null));
+  const pitch = document.createElement("button");
+  pitch.className = "chip action"; pitch.type = "button"; pitch.textContent = "Go flat";
+  pitch.addEventListener("click", () => {
     const flat = map.getPitch() > 1;
     map.easeTo({ pitch: flat ? 0 : 55, bearing: flat ? 0 : -15, duration: 800 });
-    btn.textContent = flat ? "Go 3D" : "Go flat";
+    pitch.textContent = flat ? "Go 3D" : "Go flat";
   });
+  box.append(pitch);
 }
 
 function buildLegend() {
-  const el = document.getElementById("legend");
-  el.innerHTML = SPEED_STOPS.map(([v, c]) => `<span style="background:${c}">${v}</span>`).join("") + `<span style="background:#bdbdbd;color:#333;text-shadow:none">none</span>`;
-  const agencies = Object.entries(AGENCY_NAME).map(([k, n]) => `<span class="swatch" style="background:${AGENCY_COLOUR[k]}"></span>${n}`).join(" &nbsp; ");
-  const flow = FLOW_STOPS.map(([v, c]) => `<span class="swatch" style="background:${c}"></span>${v}`).join(" ") + " vehicles/min";
-  el.insertAdjacentHTML("afterend", `<p class="small">${agencies}</p><p class="small">Camera rings, both directions, larger and darker with flow: ${flow}. Hollow grey: no stream or not sampled yet.</p>`);
+  const max = SPEED_STOPS[SPEED_STOPS.length - 1][0];
+  const css = SPEED_STOPS.map(([v, c]) => `${c} ${Math.round((v / max) * 100)}%`).join(", ");
+  document.getElementById("legend").style.background = `linear-gradient(90deg, ${css})`;
+  const labelsMph = [0, 15, 30, 45, 60];
+  document.getElementById("legend-labels").innerHTML = labelsMph.map((m, i) => `<span>${m}${i === labelsMph.length - 1 ? " mph" : ""}</span>`).join("");
+  const agencies = Object.entries(AGENCY_NAME).map(([k, n]) => `<span class="swatch" style="background:${AGENCY_COLOUR[k]}"></span>${n}`).join("");
+  document.getElementById("legend-agencies").innerHTML = `Buses by agency:${agencies}. Camera rings grow and darken with vehicles per minute.`;
 }
 
-function cameraCountsHtml(c) {
-  if (!c) return `<br><small>Not in the camera sampler's subset.</small>`;
-  if (c.status !== "ok") return `<br><b>Stream count:</b> ${c.status}${c.error ? ", " + c.error : ""}${c.sampled_at ? ", tried " + ageText(c.age_s) + " ago" : ""}`;
-  const dir = (d, way) => `${d.label} (${way}): <b>${d.count}</b> crossings in ${c.duration_s} s = <b>${d.vehicles_per_min}/min</b>, flow ${fmt(d.flow_px_s, " px/s")}, density ${d.density}`;
-  return `<br><b>Counted from the stream</b> ${c.sampled_at.replace("T", " ").slice(0, 19)} UTC, ${ageText(c.age_s)} ago<br>` +
-    `${dir(c.a, "down on screen")}<br>${dir(c.b, "up on screen")}<br>` +
-    `all boxes ${c.density_all} per frame, ${c.tracks} tracks; speed: ${c.speed_status === "calibrated" ? fmt(c.speed_kmh.a, " km/h") + " / " + fmt(c.speed_kmh.b, " km/h") : "not calibrated, none given"}<br>` +
-    `<small>${c.resolution} at ${c.fps} fps, ${c.frames} frames; ${c.model} (Ultralytics ${c.model_version}) on ${c.device}; decode ${c.decode_s} s, inference ${c.infer_s} s. Directions are sides of a fixed line, not route directions.</small>`;
+// Popup building blocks. Speeds come in km/h and are shown mph first.
+const esc = (v) => String(v ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function speedKey(kmh, extra = "") {
+  const sp = speedParts(kmh);
+  if (!sp) return `<div class="key muted">No speed</div>`;
+  return `<div class="key"><span class="swatch" style="background:${rampColour(kmh, SPEED_STOPS)}"></span><b>${sp.mph} mph</b><small>${sp.kmh} km/h</small>${extra}</div>`;
+}
+function pop(title, kicker, body, kickerStyle = "") {
+  return `<div class="pop"><h3>${esc(title)}</h3><div class="kicker" style="${kickerStyle}">${kicker}</div>${body}</div>`;
 }
 
-function fmt(v, unit = "") { return v === null || v === undefined ? "–" : `${v}${unit}`; }
-function ageText(s) { return s === null || s === undefined ? "–" : s < 120 ? `${s} s` : `${Math.round(s / 60)} min`; }
+function roadHtml(p, st) {
+  const limit = parseLimitMph(p.maxspeed);
+  let body;
+  if (st.src) {
+    const srcWords = sourceText(st.src, st.n_bus, st.n_vds);
+    body = speedKey(st.speed) +
+      `<div class="fact">${srcWords}, newest ${relativeAge(st.age)}</div>` +
+      (limit ? `<div class="fact">Posted limit ${limit} mph <span class="tag">OpenStreetMap</span>${limitComparison(st.speed, limit) ? `, ${limitComparison(st.speed, limit)}` : ""}</div>` : "") +
+      (st.src !== "vds" ? `<p class="hint">Bus speeds between stops run below car speeds.</p>` : "");
+  } else {
+    body = `<div class="key muted">No reading in the last 10 minutes</div>` +
+      (limit ? `<div class="fact">Posted limit ${limit} mph <span class="tag">OpenStreetMap</span></div>` : "");
+  }
+  return pop(p.name || "Unnamed road", roadClassName(p.highway), body);
+}
+
+function busHtml(p) {
+  const agency = AGENCY_NAME[p.agency] || p.agency;
+  const sp = speedParts(p.speed_kmh);
+  const heading = headingText(p.bearing);
+  const key = sp ? `<div class="key"><b>${sp.mph} mph</b><small>${sp.kmh} km/h${heading ? ", " + heading : ""}</small></div>`
+                 : `<div class="key muted">${heading ? heading[0].toUpperCase() + heading.slice(1) : "No speed yet"}</div>`;
+  return pop(p.route ? `Route ${p.route}` : agency, `<b style="color:${AGENCY_COLOUR[p.agency] || "#444"}">${esc(agency)}</b>`,
+    key + `<div class="fact">seen ${relativeAge(p.age_s)}</div>` +
+    `<p class="hint">Bus ${esc(p.vehicle_id)}${p.trip_id ? ", trip " + esc(p.trip_id) : ""}. Speed is the last pair of positions on the route, not a live speedometer.</p>`);
+}
+
+function cameraHtml(p) {
+  const c = cameraReadings[p.cctv_id];
+  const title = (p.name || "").replace(/^\S+ : \(\d+\) /, "").replace(/^\S+: \(\d+\) /, "") || `Camera ${p.cctv_id}`;
+  const img = p.image_url ? `<img src="${p.image_url}?t=${Date.now()}" alt="camera still" loading="lazy">` : "";
+  let body = img + `<div class="fact">Still from Caltrans, refreshed every ${p.image_minutes ?? 2} min</div>`;
+  if (c && c.status === "ok") {
+    const sampleAge = c.sampled_at ? Math.round((Date.now() - Date.parse(c.sampled_at)) / 1000) : c.age_s;
+    body += `<div class="key"><b>${c.vehicles_per_min}</b><small>vehicles per minute, counted ${relativeAge(sampleAge)}</small></div>` +
+      `<div class="fact">${c.a.count} crossing down the frame, ${c.b.count} up, in ${c.duration_s} s</div>` +
+      `<p class="hint">Counted from 15 s of the stream with YOLO11 and ByteTrack. Up and down are sides of a fixed line, not route directions. No speed: this camera is not calibrated.</p>`;
+  } else if (c) {
+    body += `<div class="key muted">No stream count</div><div class="fact">${esc(c.status)}${c.error ? ": " + esc(c.error) : ""}</div>`;
+  }
+  return pop(title, `Caltrans camera, ${esc(p.route)} ${esc(p.direction)}`, body);
+}
+
+function detectorHtml(p) {
+  const kicker = `Caltrans detector, ${esc(p.route && /^\d/.test(p.route) ? "Route " + p.route : p.route)} ${esc(p.direction)}`;
+  const body = p.speed_kmh
+    ? speedKey(p.speed_kmh) + `<div class="fact">${plural(p.volume_30s ?? 0, "vehicle")} in 30 s, ${esc(p.colour_label)}, ${relativeAge(p.age_s)}</div><p class="hint">Deprecated Caltrans feed, still live.</p>`
+    : `<div class="key muted">No reading</div><div class="fact">The station reports no speed right now.</div>`;
+  return pop(p.name || "Detector", kicker, body);
+}
+
+function incidentHtml(p) {
+  const details = JSON.parse(p.details || "[]");
+  return pop(p.text || "Incident", `CHP incident, ${pacificTime(p.time)}`,
+    `<div class="fact">reported ${relativeAge(Math.round((Date.now() - Date.parse(p.time)) / 1000))}</div>` +
+    (details.length ? `<details><summary>Dispatch notes</summary><div class="mono">${details.map(esc).join("\n")}</div></details>` : ""));
+}
+
+function closureHtml(p) {
+  return pop("Lane closure", `Caltrans${p.in_effect ? ", in effect now" : ", scheduled"}`,
+    `<div class="fact">${esc(p.text)}</div><div class="fact">${pacificDateTime(p.time)} to ${p.end ? pacificDateTime(p.end) : "open end"}</div>`);
+}
+
+function signHtml(p) {
+  return pop(p.location || "Message sign", `Caltrans sign, ${esc(p.route)} ${esc(p.direction)}`,
+    p.text ? `<div class="mono">${esc(p.text)}</div>` : `<div class="key muted">${esc(p.display || "Blank")}</div>`);
+}
+
+// One click handler: the topmost layer under the pointer answers, so a road and the route shape beneath it
+// never open two popups at once. Roads also answer on hover.
+const CLICK_ORDER = [
+  ["vehicles", busHtml], ["vehicle-labels", busHtml], ["incidents", incidentHtml], ["incident-labels", incidentHtml],
+  ["closure-points", closureHtml], ["closures", closureHtml], ["signs", signHtml], ["detectors", detectorHtml],
+  ["camera-counts", cameraHtml], ["cameras", cameraHtml], ["camera-labels", cameraHtml], ["stops", stopHtml],
+  ["roads", (p, st) => roadHtml(p, st)], ["shapes", shapeHtml],
+];
+const POINTER_LAYERS = CLICK_ORDER.map(([id]) => id).filter((id) => id !== "roads" && id !== "shapes");
+
+function stopHtml(p) { return pop(p.stop_name, `${esc(p.agency_name)} stop`, ""); }
+function shapeHtml(p) {
+  return pop(`Route ${p.route_short_name || p.route_id}`, esc(p.agency_name),
+    `<div class="fact">${esc(p.route_long_name || "")}</div><div class="fact">${plural(p.trips ?? 0, "trip")} on this shape</div>`);
+}
 
 function wirePopups() {
-  const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8 });
+  const hover = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 8, maxWidth: "300px" });
   map.on("mousemove", "roads", (e) => {
     const f = e.features[0];
-    const p = f.properties, st = f.state || {};
     map.getCanvas().style.cursor = "crosshair";
-    const src = st.src ? { bus: "buses", vds: "detector", both: "buses and detector" }[st.src] : "no reading in the last 10 min";
-    hover.setLngLat(e.lngLat).setHTML(
-      `<b>${p.name || "(unnamed)"}</b> <i>${p.highway}</i><br>segment ${p.segment_id}, ${Math.round(p.length_m)} m, osm ${p.osm_id}${p.maxspeed ? ", limit " + p.maxspeed : ""}<br>` +
-      (st.src ? `<b>${fmt(st.speed, " km/h")}</b> from ${src}<br>bus ${fmt(st.bus, " km/h")} (${st.n_bus ?? 0} obs), detector ${fmt(st.vds, " km/h")} (${st.n_vds ?? 0} obs), newest ${ageText(st.age)} ago` : src)
-    ).addTo(map);
+    hover.setLngLat(e.lngLat).setHTML(roadHtml(f.properties, f.state || {})).addTo(map);
   });
   map.on("mouseleave", "roads", () => { map.getCanvas().style.cursor = ""; hover.remove(); });
 
-  const click = (layer, html) => map.on("click", layer, (e) => {
-    const f = e.features[0];
-    const coords = f.geometry.type === "Point" ? f.geometry.coordinates.slice() : e.lngLat;
-    new maplibregl.Popup({ offset: 10 }).setLngLat(coords).setHTML(html(f.properties)).addTo(map);
-    e.originalEvent.stopPropagation();
+  map.on("click", (e) => {
+    const present = new Set(CLICK_ORDER.map(([id]) => id).filter((id) => map.getLayer(id)));
+    const hits = map.queryRenderedFeatures(e.point, { layers: [...present] });
+    for (const [id, html] of CLICK_ORDER) {
+      const f = hits.find((h) => h.layer.id === id);
+      if (!f) continue;
+      hover.remove();
+      const coords = f.geometry.type === "Point" ? f.geometry.coordinates.slice() : e.lngLat;
+      new maplibregl.Popup({ offset: 10, maxWidth: "300px" }).setLngLat(coords).setHTML(html(f.properties, f.state || {})).addTo(map);
+      return;
+    }
   });
-  for (const layer of ["vehicles", "vehicle-labels"]) click(layer, (p) =>
-    `<b>${AGENCY_NAME[p.agency] || p.agency} ${p.route || ""}</b><br>vehicle ${p.vehicle_id}${p.trip_id ? ", trip " + p.trip_id : ""}<br>` +
-    `last bus speed ${fmt(p.speed_kmh, " km/h")}, bearing ${fmt(p.bearing, "°")}<br>position ${ageText(p.age_s)} old`);
-  click("incidents", (p) => `<b>CHP incident</b> ${p.time?.slice(11, 16)} UTC<br>${p.text}<br><small>${(JSON.parse(p.details || "[]")).join("<br>")}</small>`);
-  for (const layer of ["closures", "closure-points"]) click(layer, (p) =>
-    `<b>Caltrans closure</b>${p.in_effect ? " (in effect, 10-97)" : ""}<br>${p.text}<br>from ${p.time?.replace("T", " ").slice(0, 16)} to ${p.end ? p.end.replace("T", " ").slice(0, 16) : "indefinite"} UTC`);
-  click("signs", (p) => `<b>Sign ${p.route} ${p.direction}</b>, ${p.location}<br>${p.text ? "<code>" + p.text + "</code>" : "<i>" + (p.display || "blank") + "</i>"}`);
-  click("detectors", (p) => `<b>Caltrans detector ${p.station_id}</b> ${p.route} ${p.direction} pm ${fmt(p.postmile)}<br>${p.name}<br>` +
-    (p.speed_kmh ? `<b>${p.speed_kmh} km/h</b> (${p.speed_mph} mph), ${p.volume_30s} vehicles per 30 s, code ${p.colour} ${p.colour_label}, ${ageText(p.age_s)} old` : `no data (code ${p.colour ?? "–"}), segment ${p.segment_id ?? "none"}`));
-  const cameraHtml = (p) => `<b>Caltrans camera ${p.cctv_id}</b> ${p.route} ${p.direction}<br>${p.name}<br>` +
-    (p.image_url ? `<img src="${p.image_url}?t=${Date.now()}" alt="camera still" loading="lazy"><small>still from Caltrans, refreshed every ${p.image_minutes ?? 2} min</small>` : "no image URL") +
-    cameraCountsHtml(cameraReadings[p.cctv_id]);
-  click("cameras", cameraHtml);
-  click("camera-counts", cameraHtml);
-  click("stops", (p) => `<b>${p.stop_name}</b><br>${p.agency_name}, stop ${p.stop_id}`);
-  click("shapes", (p) => `<b>${p.agency_name} ${p.route_short_name || p.route_id}</b> ${p.route_long_name}<br>shape ${p.shape_id}, direction ${p.direction_id}, ${p.trips} trips`);
-  for (const layer of ["vehicles", "incidents", "closures", "signs", "detectors", "cameras", "camera-counts", "stops"]) {
+  for (const layer of POINTER_LAYERS) {
     map.on("mouseenter", layer, () => { map.getCanvas().style.cursor = "pointer"; });
     map.on("mouseleave", layer, () => { map.getCanvas().style.cursor = ""; });
   }

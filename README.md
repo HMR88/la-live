@@ -10,7 +10,7 @@ Status: steps 1 to 5, 7 and 8 of the plan done on 2026-11-05 and 06 (step 8's fi
 |---|---|---|
 | Preparation | Roads, transit shapes, detectors and cameras for the area, matched to road segments and written as vector tiles. Runs through [qgis-mcp](https://github.com/HMR88/QGIS) and Valhalla. | `prep/` |
 | Poller | A service that reads the live feeds every 30 to 60 seconds, turns bus movements and detector readings into segment speeds, keeps a history and writes snapshots. | `poller/` |
-| Viewer | A static MapLibre GL JS page that draws the snapshots: roads coloured by speed (absolute now, ratio to baseline after step 6), moving vehicles, incidents, closures, signs, detectors, cameras, terrain and extruded buildings. Served by `serve.py`. | `viewer/` |
+| Viewer | A static MapLibre GL JS page that draws the snapshots: roads coloured by speed (absolute now, ratio to baseline after step 6), moving vehicles, incidents, closures, signs, detectors, cameras, terrain and extruded buildings. Speeds in mph first, times Pacific, a status pill for mode and freshness ([docs/log/viewer-ux.md](docs/log/viewer-ux.md)). Served by `serve.py`. | `viewer/` |
 | Cameras | A separate process: 15 s of HLS video per camera from `cameras/subset.json`, decoded with PyAV, tracked with Ultralytics YOLO11 small and ByteTrack on Apple's mps, counted across a line per direction. Writes `live/cameras.geojson` and `history/cameras.sqlite`. Speed needs a per-camera calibration file; none exists yet. Installed with `uv sync --extra cameras`. | `cameras/` |
 
 ## Requirements
@@ -48,7 +48,7 @@ uv sync --extra cameras                                # PyAV, Ultralytics, torc
 
 To rehearse the job here: `uv run python prep/publish.py --out /tmp/site` then `uv run python serve.py --root /tmp/site --prefix /la-live --port 8081` and open `http://127.0.0.1:8081/la-live/`.
 
-The venv is managed by uv (`uv sync`). For an unattended run on a laptop put `caffeinate -i` in front of the command, or the Mac sleeps and the cycles stall. Checks: `.venv/bin/pyright` and `.venv/bin/python -m pytest tests` (the camera tests need the `cameras` extra).
+The venv is managed by uv (`uv sync`). For an unattended run on a laptop put `caffeinate -i` in front of the command, or the Mac sleeps and the cycles stall. Checks: `.venv/bin/pyright`, `.venv/bin/python -m pytest tests` (the camera tests need the `cameras` extra) and `node --test tests/js/format.test.mjs` for the viewer's formatting rules.
 
 ## Licence
 

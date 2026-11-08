@@ -16,15 +16,14 @@ from pathlib import Path
 from typing import Any
 
 from poller.base import BaseData, load_base
-from poller.feeds import Feed, MetroWebSocketFeed, default_feeds
+from poller.feeds import GtfsRtFeed, Feed, MetroWebSocketFeed, default_feeds
 from poller.model import Observation, PairResult, SegmentSpeed
 from poller.shape_index import ShapeIndex, build_index
-from poller.snapshot import write_detectors, write_events, write_segments, write_status, write_vehicles
+from poller.snapshot import WINDOW_S, write_detectors, write_events, write_segments, write_status, write_vehicles
 from poller.speed import SpeedEngine
 from poller.store import Store
 from poller.traffic import AtmsSnapshot, default_sources, in_bbox
 
-WINDOW_S = 600
 
 
 def detector_rows(base: BaseData, atms: AtmsSnapshot) -> list[SegmentSpeed]:
@@ -98,6 +97,8 @@ def run(minutes: float, interval: float, base_dir: Path, live_dir: Path, history
             st.update({"last_fetch_utc": _iso(now), "vehicles": len(obs), "in_corridor": len(inside)})
             if isinstance(feed, MetroWebSocketFeed):
                 st.update({"messages": feed.messages, "reconnects": feed.reconnects, "ws_error": feed.last_error})
+            if isinstance(feed, GtfsRtFeed):
+                st["retries"] = feed.retries
             for o in inside:
                 per_agency_vehicles.setdefault(o.agency, set()).add(o.vehicle_id)
                 result, seg_rows = engine.ingest(o)

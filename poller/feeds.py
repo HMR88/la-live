@@ -14,6 +14,9 @@ import json
 import threading
 from typing import Any, Protocol
 
+import time
+from collections.abc import Callable
+
 import httpx
 import websockets
 from google.transit import gtfs_realtime_pb2 as rt
@@ -35,16 +38,29 @@ class Feed(Protocol):
 class GtfsRtFeed:
     """A GTFS-Realtime vehicle positions feed polled over HTTP."""
 
-    def __init__(self, name: str, agency: str, url: str, client: httpx.Client | None = None) -> None:
+    def __init__(self, name: str, agency: str, url: str, client: httpx.Client | None = None,
+                 backoff_s: tuple[float, ...] = (1.0, 3.0), sleep: Callable[[float], None] = time.sleep) -> None:
         self.name = name
         self.agency = agency
         self.url = url
         self._client = client or httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=20)
+        self._backoff = backoff_s
+        self._sleep = sleep
+        self.retries = 0  # attempts beyond the first, over the feed's life, reported in status.json
 
     def fetch(self) -> list[Observation]:
-        r = self._client.get(self.url)
-        r.raise_for_status()
-        return parse_gtfs_rt(self.agency, r.content)
+        """One cycle's fetch: up to len(backoff)+1 attempts, so a single timeout does not cost the cycle."""
+        for attempt, wait in enumerate((*self._backoff, None)):
+            try:
+                r = self._client.get(self.url)
+                r.raise_for_status()
+                return parse_gtfs_rt(self.agency, r.content)
+            except (httpx.HTTPError, OSError):
+                if wait is None:
+                    raise
+                self.retries += 1
+                self._sleep(wait)
+        raise RuntimeError("unreachable")
 
     def close(self) -> None:
         self._client.close()

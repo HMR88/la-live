@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   speedParts, durationText, relativeAge, pacificTime, pacificDateTime, roadClassName, parseLimitMph,
-  limitComparison, sourceText, headingText, freshness, modeLabel, plural,
+  limitComparison, sourceText, headingText, freshness, modeLabel, sourceLabel, plural,
 } from "../../viewer/format.js";
 
 test("speeds are shown in mph first with the km/h value kept", () => {
@@ -68,14 +68,24 @@ test("sources, headings, plurals", () => {
   assert.equal(plural(2, "incident"), "2 incidents");
 });
 
-test("freshness and the mode pill", () => {
+test("freshness depends on the expected cadence", () => {
   assert.equal(freshness(30), "fresh");
   assert.equal(freshness(300), "aging");
   assert.equal(freshness(601), "stale");
   assert.equal(freshness(null), "unknown");
-  assert.deepEqual(modeLabel({ source: "local", interval_s: 30, cadence_s: 30 }), { kind: "live", text: "Live, refreshes every 30 s" });
-  assert.deepEqual(modeLabel({ source: "github-actions", interval_s: 30, cadence_s: 300 }), { kind: "scheduled", text: "Scheduled, new snapshot about every 5 min" });
-  assert.deepEqual(modeLabel(undefined, 30), { kind: "live", text: "Live, refreshes every 30 s" });
+  assert.equal(freshness(240, 300), "fresh");   // a 4-minute-old snapshot from a 5-minute channel is normal
+  assert.equal(freshness(400, 300), "aging");
+  assert.equal(freshness(901, 300), "stale");
+});
+
+test("the mode pill and the data source words", () => {
+  assert.deepEqual(modeLabel({ source: "local", interval_s: 30, cadence_s: 30 }), { kind: "live", text: "Live, refreshes every 30 s", cadence: 30 });
+  assert.deepEqual(modeLabel({ source: "github-actions", interval_s: 30, cadence_s: 300 }), { kind: "channel", text: "Live via GitHub Actions, published every 5 min", cadence: 300 });
+  assert.deepEqual(modeLabel({ source: "local", interval_s: 30, cadence_s: 300 }), { kind: "scheduled", text: "Scheduled, new snapshot about every 5 min", cadence: 300 });
+  assert.deepEqual(modeLabel(undefined, 30), { kind: "live", text: "Live, refreshes every 30 s", cadence: 30 });
+  assert.equal(sourceLabel("channel"), "via the live branch");
+  assert.equal(sourceLabel("site"), "from this site's copy");
+  assert.equal(sourceLabel("local"), "");
 });
 
 import { rampColour } from "../../viewer/format.js";

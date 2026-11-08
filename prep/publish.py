@@ -12,17 +12,18 @@ import argparse
 import shutil
 from pathlib import Path
 
-LIVE_FILES = ["vehicles.geojson", "segments.geojson", "events.geojson", "detectors.geojson", "status.json", "cameras.geojson"]
-REQUIRED_LIVE = ["vehicles.geojson", "segments.geojson", "status.json"]
+LIVE_FILES = ["vehicles.geojson", "segments.json", "segments.geojson", "events.geojson", "detectors.geojson", "status.json", "cameras.geojson"]
+REQUIRED_LIVE = ["vehicles.geojson", "segments.json", "status.json"]
 TILES = ["corridor.pmtiles", "buildings.pmtiles"]
 ROOT_INDEX = """<!doctype html><meta charset="utf-8"><title>la-live</title>
 <meta http-equiv="refresh" content="0; url=viewer/"><a href="viewer/">la-live viewer</a>
 """
 
 
-def assemble(repo: Path, out: Path) -> dict[str, int]:
-    """Copy the site into out (emptied first). Returns bytes per part. Missing required inputs raise."""
-    missing = [f for f in REQUIRED_LIVE if not (repo / "live" / f).exists()] + [t for t in TILES if not (repo / "data" / "base" / t).exists()]
+def assemble(repo: Path, out: Path, optional_live: bool = False) -> dict[str, int]:
+    """Copy the site into out (emptied first). Returns bytes per part. Missing required inputs raise,
+    except the live files when optional_live is set (the Pages site is a fallback copy; the viewer reads the live branch first)."""
+    missing = ([] if optional_live else [f for f in REQUIRED_LIVE if not (repo / "live" / f).exists()]) + [t for t in TILES if not (repo / "data" / "base" / t).exists()]
     if missing:
         raise FileNotFoundError(f"cannot publish without {missing}")
     if out.exists():
@@ -52,8 +53,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", type=Path, default=Path(__file__).resolve().parent.parent)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--optional-live", action="store_true", help="publish even without live snapshots")
     args = ap.parse_args()
-    sizes = assemble(args.repo, args.out)
+    sizes = assemble(args.repo, args.out, args.optional_live)
     print(", ".join(f"{k} {v / 1e6:.1f} MB" for k, v in sizes.items()))
     return 0
 

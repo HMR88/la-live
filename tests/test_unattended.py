@@ -40,6 +40,7 @@ def test_publish_assembles_the_pages_layout(tmp_path: Path):
     (repo / "live").mkdir()
     for f in ["vehicles.geojson", "segments.geojson", "events.geojson", "detectors.geojson"]:
         (repo / "live" / f).write_text('{"type":"FeatureCollection","features":[]}')
+    (repo / "live" / "segments.json").write_text('{"rows":[]}')
     (repo / "live" / "status.json").write_text(json.dumps({"run": {"source": "github-actions"}}))
     (repo / "data" / "base").mkdir(parents=True)
     (repo / "data" / "base" / "corridor.pmtiles").write_bytes(b"PMTiles" + bytes(100))
@@ -49,7 +50,7 @@ def test_publish_assembles_the_pages_layout(tmp_path: Path):
     sizes = assemble(repo, out)
     assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*") if p.is_file()) == [
         ".nojekyll", "data/base/buildings.pmtiles", "data/base/corridor.pmtiles", "index.html",
-        "live/detectors.geojson", "live/events.geojson", "live/segments.geojson", "live/status.json", "live/vehicles.geojson",
+        "live/detectors.geojson", "live/events.geojson", "live/segments.geojson", "live/segments.json", "live/status.json", "live/vehicles.geojson",
         "viewer/app.js", "viewer/index.html"]
     assert sizes["tiles"] == 107 + 57 and sizes["total"] == sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     assert 'url=viewer/' in (out / "index.html").read_text()

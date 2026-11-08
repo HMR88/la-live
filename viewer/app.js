@@ -4,18 +4,39 @@
 // Coordinates everywhere are WGS84 lon/lat (EPSG:4326), as MapLibre expects.
 import * as maplibregl from "https://unpkg.com/maplibre-gl@6.16.0/dist/maplibre-gl.mjs";
 import { speedParts, durationText, relativeAge, pacificTime, pacificDateTime, roadClassName, parseLimitMph, limitComparison,
-  sourceText, headingText, freshness, modeLabel, plural, rampColour } from "./format.js";
+  sourceText, headingText, freshness, modeLabel, sourceLabel, plural, rampColour } from "./format.js";
 const pmtiles = window.pmtiles;
 
-const BASE = new URL("..", location.href).href; // repository root as served by serve.py
-const LIVE = {
-  segments: BASE + "live/segments.geojson",
-  vehicles: BASE + "live/vehicles.geojson",
-  events: BASE + "live/events.geojson",
-  detectors: BASE + "live/detectors.geojson",
-  camera_counts: BASE + "live/cameras.geojson", // written by the camera sampler, a separate process
-  status: BASE + "live/status.json",
-};
+const BASE = new URL("..", location.href).href; // repository root as served by serve.py or Pages
+// Live files: on a public host they come first from the `live` branch that the unattended job force-pushes
+// every 5 minutes (raw.githubusercontent.com sends CORS * and a fresh query string misses its 5-minute cache),
+// then from this site's own copy. On localhost the local poller's files are the freshest there are.
+const LOCAL_HOST = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+const DEFAULT_CHANNEL = "https://raw.githubusercontent.com/HMR88/la-live/live/";
+// ?channel=<url> overrides the channel (a fork's branch, or a local folder when rehearsing); ?channel= disables it.
+const channelParam = new URLSearchParams(location.search).get("channel");
+const CHANNEL = channelParam !== null ? (channelParam || null) : (LOCAL_HOST ? null : DEFAULT_CHANNEL);
+const LIVE_FILES = { segments: "segments.json", vehicles: "vehicles.geojson", events: "events.geojson",
+  detectors: "detectors.geojson", camera_counts: "cameras.geojson", status: "status.json" };
+let dataSource = LOCAL_HOST ? "local" : "unknown"; // channel | site | local, for the pill
+let channelWarned = false; // one console line per outage, not one per file per refresh
+
+async function fetchLive(name) {
+  const file = LIVE_FILES[name];
+  if (CHANNEL) {
+    try {
+      const r = await fetch(CHANNEL + file + "?t=" + Date.now(), { cache: "no-store" });
+      if (r.ok) { dataSource = "channel"; channelWarned = false; return await r.json(); }
+      if (!channelWarned) { console.warn(`live branch answered HTTP ${r.status} for ${file}, using the site's copy`); channelWarned = true; }
+    } catch (err) {
+      if (!channelWarned) { console.warn("live branch unreachable, using the site's copy", err); channelWarned = true; }
+    }
+  }
+  const r = await fetch(BASE + "live/" + file + "?t=" + Date.now(), { cache: "no-store" });
+  if (!r.ok) throw new Error(`${file}: HTTP ${r.status}`);
+  dataSource = CHANNEL ? "site" : "local";
+  return await r.json();
+}
 // Vehicles per minute (both directions) ramp for the camera rings. Flow, not speed.
 const FLOW_STOPS = [[0, "#fde0dd"], [40, "#fa9fb5"], [80, "#dd3497"], [120, "#7a0177"]];
 let cameraReadings = {}; // cctv_id -> properties of live/cameras.geojson, for the camera popup
@@ -67,9 +88,8 @@ map.on("load", () => {
     attribution: "© OpenStreetMap contributors (ODbL), Geofabrik, LA Metro, Big Blue Bus, Culver CityBus, LADOT, Caltrans",
   });
   map.addSource("buildings", { type: "vector", url: "pmtiles://" + BASE + "data/base/buildings.pmtiles" });
-  for (const [name, url] of Object.entries(LIVE)) {
-    if (name !== "status" && name !== "segments") map.addSource(name, { type: "geojson", data: url });
-  }
+  const empty = { type: "FeatureCollection", features: [] };
+  for (const name of ["vehicles", "events", "detectors", "camera_counts"]) map.addSource(name, { type: "geojson", data: empty });
 
   // Place our layers under the basemap's labels so names stay readable.
   const firstSymbol = map.getStyle().layers.find((l) => l.type === "symbol")?.id;
@@ -188,14 +208,13 @@ map.on("load", () => {
   wirePopups();
 });
 
-// Live segment speeds join the road tiles by segment_id through feature state.
+// Live segment speeds join the road tiles by segment_id through feature state. segments.json carries the
+// properties only; the geometry is already in the tiles.
 let liveIds = new Set();
 async function refreshSegments() {
-  const r = await fetch(LIVE.segments + "?t=" + Date.now(), { cache: "no-store" });
-  const fc = await r.json();
+  const data = await fetchLive("segments");
   const next = new Set();
-  for (const f of fc.features) {
-    const p = f.properties;
+  for (const p of data.rows) {
     next.add(p.segment_id);
     map.setFeatureState({ source: "corridor", sourceLayer: "segments", id: p.segment_id },
       { speed: p.speed_kmh, src: p.source, bus: p.speed_bus_kmh, vds: p.speed_vds_kmh, n_bus: p.n_bus, n_vds: p.n_vds, age: p.age_s });
@@ -204,7 +223,7 @@ async function refreshSegments() {
     if (!next.has(id)) map.removeFeatureState({ source: "corridor", sourceLayer: "segments", id });
   }
   liveIds = next;
-  return { count: fc.features.length, generated: fc.generated };
+  return { count: data.rows.length, generated: data.generated };
 }
 
 let latestStatus = null; // the last status.json, for the pill's clock tick between fetches
@@ -214,8 +233,7 @@ function row(kind, name, figure, title = "") { return `<li title="${title}">${do
 function set(id, html) { document.getElementById(id).innerHTML = html; }
 
 async function refreshStatus() {
-  const r = await fetch(LIVE.status + "?t=" + Date.now(), { cache: "no-store" });
-  const s = await r.json();
+  const s = await fetchLive("status");
   latestStatus = s;
   renderPill();
   const feedNames = { bbb: "Big Blue Bus", ccb: "Culver CityBus", ladot: "LADOT", metro_ws: "LA Metro" };
@@ -247,7 +265,8 @@ async function refreshStatus() {
     ["Roads with a speed", `${s.segments_in_snapshot} segments in the last 10 min`],
     ["Bus pairs", `${pr.kept ?? 0} kept of ${total} since start`],
     ...Object.entries(s.feeds).map(([name, f]) => [feedNames[name] || name,
-      `${f.in_corridor ?? 0} of ${f.vehicles ?? 0} vehicles in corridor${f.errors ? `, <span class="warn-text">${f.errors} errors: ${f.last_error || ""}</span>` : ""}${f.messages ? `, ${f.messages.toLocaleString()} WebSocket messages` : ""}`]),
+      `${f.in_corridor ?? 0} of ${f.vehicles ?? 0} vehicles in corridor${f.retries ? `, ${f.retries} retries` : ""}${f.errors ? `, <span class="warn-text">${f.errors} errors: ${f.last_error || ""}</span>` : ""}${f.messages ? `, ${f.messages.toLocaleString()} WebSocket messages` : ""}` +
+      (name === "bbb" && run.source === "github-actions" && f.errors ? ` <span class="warn-text">Big Blue Bus does not answer GitHub's runners (connect timeouts); its buses appear on local runs only.</span>` : "")]),
     ...Object.entries(src).map(([name, x]) => [{ atms: "Detector feed", chp: "CHP feed", lcs: "Closure feed", cms: "Sign feed" }[name] || name,
       `last good copy ${relativeAge(x.age_s)}, every ${x.interval_s} s${x.errors ? `, <span class="warn-text">${x.errors} errors</span>` : ""}` +
       (name === "atms" ? `. <span class="warn-text">Deprecated by Caltrans, still live.</span>` : "")]),
@@ -260,26 +279,29 @@ function renderPill() {
   if (!s) return;
   const age = Math.round((Date.now() - Date.parse(s.generated)) / 1000);
   const mode = modeLabel(s.run, s.interval_s);
-  document.querySelector("#pill .dot").className = "dot " + freshness(age);
+  document.querySelector("#pill .dot").className = "dot " + freshness(age, mode.cadence);
   document.getElementById("pill-text").textContent = mode.text;
   const ageEl = document.getElementById("pill-age");
-  ageEl.textContent = relativeAge(age);
-  ageEl.title = `snapshot written ${pacificDateTime(s.generated)}`;
-  document.getElementById("pill").title = mode.kind === "scheduled"
-    ? "Snapshots come from a scheduled job; vehicle positions are as old as the snapshot."
+  const from = sourceLabel(dataSource);
+  ageEl.textContent = relativeAge(age) + (from ? ` · ${from}` : "");
+  ageEl.title = `snapshot written ${pacificDateTime(s.generated)}${from ? ", read " + from : ""}`;
+  document.getElementById("pill").title = mode.kind === "channel"
+    ? "The unattended job publishes a snapshot to the live branch every 5 minutes; vehicle positions are as old as the snapshot."
+    : mode.kind === "scheduled" ? "Snapshots come from a scheduled job; vehicle positions are as old as the snapshot."
     : "A local poller writes a new snapshot every cycle; the page refetches every 30 s.";
 }
 setInterval(renderPill, 5000);
 
 async function refreshCameras() {
-  const r = await fetch(LIVE.camera_counts + "?t=" + Date.now(), { cache: "no-store" });
-  if (!r.ok) {
+  let fc;
+  try {
+    fc = await fetchLive("camera_counts");
+  } catch {
     map.getSource("camera_counts").setData({ type: "FeatureCollection", features: [] });
     cameraReadings = {};
-    set("rows-cameras", row("unknown", "Camera counts", "sampler not running", "live/cameras.geojson is missing"));
+    set("rows-cameras", row("unknown", "Cameras counted", "sampler not running", "live/cameras.geojson is missing"));
     return;
   }
-  const fc = await r.json();
   map.getSource("camera_counts").setData(fc);
   cameraReadings = Object.fromEntries(fc.features.map((f) => [f.properties.cctv_id, f.properties]));
   const ok = fc.features.filter((f) => f.properties.status === "ok");
@@ -292,7 +314,7 @@ async function refreshCameras() {
 
 async function refresh() {
   try {
-    for (const name of ["vehicles", "events", "detectors"]) map.getSource(name).setData(LIVE[name] + "?t=" + Date.now());
+    for (const name of ["vehicles", "events", "detectors"]) map.getSource(name).setData(await fetchLive(name));
     await refreshSegments();
     await refreshStatus();
     await refreshCameras();

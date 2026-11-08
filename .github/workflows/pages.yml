@@ -1,0 +1,49 @@
+# The viewer on GitHub Pages: rebuilt on every push to main that changes it, once a day as a safety net, and
+# by hand. The live data does not pass through here any more (poll.yml publishes the `live` branch); the
+# site carries a copy of the latest snapshots as the viewer's fallback. Design: docs/log/step9.md.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "viewer/**"
+      - "prep/publish.py"
+      - ".github/workflows/pages.yml"
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: data
+          path: basedata
+      - run: mkdir -p data && mv basedata/data/base data/base
+      - name: Latest snapshots from the live branch, if it exists
+        run: |
+          mkdir -p live
+          if git fetch --depth 1 origin live; then git archive FETCH_HEAD | tar -x -C live && ls -l live; else echo "no live branch yet"; fi
+      - run: python3 prep/publish.py --out site --optional-live
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

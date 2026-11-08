@@ -107,11 +107,12 @@ export function headingText(bearing) {
   return `heading ${POINTS[i]}`;
 }
 
-/** Snapshot freshness: green under 2 min, amber under 10, red beyond; grey without a value. */
-export function freshness(ageSeconds) {
+/** Snapshot freshness against the expected cadence: green up to cadence plus 90 s (at least 2 min),
+ * amber up to three cadences (at least 10 min), red beyond; grey without a value. */
+export function freshness(ageSeconds, cadenceSeconds = 30) {
   if (ageSeconds === null || ageSeconds === undefined) return "unknown";
-  if (ageSeconds < 120) return "fresh";
-  if (ageSeconds < 600) return "aging";
+  if (ageSeconds < Math.max(120, cadenceSeconds + 90)) return "fresh";
+  if (ageSeconds < Math.max(600, 3 * cadenceSeconds)) return "aging";
   return "stale";
 }
 
@@ -119,10 +120,18 @@ export function freshness(ageSeconds) {
 export function modeLabel(run, intervalS) {
   const interval = run?.interval_s ?? intervalS ?? 30;
   const cadence = run?.cadence_s ?? interval;
-  if (run?.source === "github-actions" || cadence > interval) {
-    return { kind: "scheduled", text: `Scheduled, new snapshot about every ${Math.round(cadence / 60)} min` };
+  if (run?.source === "github-actions") {
+    return { kind: "channel", text: `Live via GitHub Actions, published every ${Math.round(cadence / 60)} min`, cadence };
   }
-  return { kind: "live", text: `Live, refreshes every ${Math.round(interval)} s` };
+  if (cadence > interval) {
+    return { kind: "scheduled", text: `Scheduled, new snapshot about every ${Math.round(cadence / 60)} min`, cadence };
+  }
+  return { kind: "live", text: `Live, refreshes every ${Math.round(interval)} s`, cadence };
+}
+
+/** Where the live files came from, for the pill. */
+export function sourceLabel(dataSource) {
+  return { channel: "via the live branch", site: "from this site's copy", local: "", unknown: "" }[dataSource] ?? "";
 }
 
 /** Colour on a [[value, "#rrggbb"], ...] ramp by linear interpolation, clamped at the ends. */

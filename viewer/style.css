@@ -33,7 +33,7 @@ a { color: var(--accent); }
 .rows { list-style: none; margin: 0; padding: 0; }
 .rows li { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 .rows .name { font-weight: 600; flex: none; }
-.rows .figure { color: var(--muted); margin-left: auto; text-align: right; }
+.rows .figure { color: var(--muted); margin-left: auto; text-align: right; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 details { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
 summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--muted); list-style: none; }
 summary::before { content: "▸ "; font-size: 10px; }

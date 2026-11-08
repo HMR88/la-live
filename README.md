@@ -29,7 +29,7 @@ docker compose up -d                                   # Valhalla on :8002, tile
 .venv/bin/python prep/step3_report.py                  # summary of a run
 .venv/bin/python prep/step4_compare.py                 # bus speeds against Caltrans detector speeds
 uv run python serve.py                                 # http://127.0.0.1:8080/viewer/ with HTTP Range for the PMTiles
-.venv/bin/python -m poller run --minutes 3.5 --source github-actions --cadence 300 --retain-days 3   # what the Actions job runs
+.venv/bin/python -m poller run --minutes 340 --source github-actions --cadence 300 --retain-days 3   # what the Actions job runs, with poller.publish_live beside it
 uv sync --extra cameras                                # PyAV, Ultralytics, torch (about 1 GB), only for the camera sampler
 .venv/bin/python -m cameras preview --out /tmp/cams    # one frame per camera with its counting line, to place lines in cameras/subset.json
 .venv/bin/python -m cameras run --sheets 101 1196      # live/cameras.geojson, history/cameras.sqlite, a round every 5 min, Ctrl-C to stop
@@ -38,15 +38,15 @@ uv sync --extra cameras                                # PyAV, Ultralytics, torc
 
 ## Running unattended
 
-`.github/workflows/poll.yml` runs the poller for 3.5 minutes every 5 minutes on GitHub Actions and publishes `viewer/`, `live/` and the base tiles to GitHub Pages at `https://hmr88.github.io/la-live/`. History passes between runs through the Actions cache (3 days of observations, 15 minutes of positions). The base layers live on the orphan branch `data`, written by `prep/data_branch.py`. Design, measurements and limits: [docs/log/step8.md](docs/log/step8.md). Cameras stay a local job. Once, by hand:
+Two workflows. `.github/workflows/poll.yml` runs the poller around the clock on GitHub Actions: one job polls for 340 minutes at 30-second cycles while a publisher force-pushes the snapshot files every 5 minutes to the orphan branch `live`, then the job starts its successor itself; a 30-minute cron restarts it after a failure. `.github/workflows/pages.yml` deploys `viewer/`, the base tiles and a copy of the snapshots to GitHub Pages at `https://hmr88.github.io/la-live/` on every push to `main` that touches the viewer, daily, and by hand. The page reads the `live` branch first (`raw.githubusercontent.com`, CORS open, a fresh query string misses its 5-minute cache) and falls back to the site's copy; `?channel=<url>` points a fork at its own branch and `?channel=` disables it. History passes between runs through the Actions cache (3 days of observations, 15 minutes of positions). The base layers live on the orphan branch `data`, written by `prep/data_branch.py`. Design, measurements and limits: [docs/log/step8.md](docs/log/step8.md) and [docs/log/step9.md](docs/log/step9.md). Cameras stay a local job. Big Blue Bus does not answer GitHub's runners, so its buses appear on local runs only. Once, by hand:
 
 1. Push `main` and the data branch: `git push origin main` and `git push --force origin data` (the branch is one commit; `git log -- data` is the folder, `git log refs/heads/data` the branch).
 2. Settings, Pages, "Build and deployment", Source: **GitHub Actions**.
-3. Settings, Actions, General, "Workflow permissions": read is enough (the deploy job asks for `pages: write` and `id-token: write` itself); make sure "Allow all actions" or at least the pinned actions (`actions/*`, `astral-sh/setup-uv`) are allowed.
-4. Actions tab, workflow "poll", "Run workflow" for the first run, then watch it; the schedule takes over after the first push.
-5. The public repository must see a commit at least every 60 days or GitHub pauses the schedule.
+3. Settings, Actions, General: actions allowed (the defaults allow `actions/*`; `astral-sh/setup-uv` must be allowed too, which "Allow all actions and reusable workflows" does). Workflow permissions can stay read-only: each workflow asks for what it needs (`contents: write` and `actions: write` for poll, `pages: write` and `id-token: write` for pages).
+4. Actions tab, workflow "poll", "Run workflow" once; it then keeps itself running. The "pages" workflow runs on the push itself.
+5. The public repository must see a commit at least every 60 days or GitHub pauses the schedules.
 
-To rehearse the job here: `uv run python prep/publish.py --out /tmp/site` then `uv run python serve.py --root /tmp/site --prefix /la-live --port 8081` and open `http://127.0.0.1:8081/la-live/`.
+To rehearse the job here: `uv run python prep/publish.py --out /tmp/site` then `uv run python serve.py --root /tmp/site --prefix /la-live --port 8081` and open `http://127.0.0.1:8081/la-live/`; the publisher runs against a local bare repository with `uv run python -m poller.publish_live --remote /tmp/live.git --once`.
 
 The venv is managed by uv (`uv sync`). For an unattended run on a laptop put `caffeinate -i` in front of the command, or the Mac sleeps and the cycles stall. Checks: `.venv/bin/pyright`, `.venv/bin/python -m pytest tests` (the camera tests need the `cameras` extra) and `node --test tests/js/format.test.mjs` for the viewer's formatting rules.
 

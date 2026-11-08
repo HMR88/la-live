@@ -13,6 +13,8 @@ from shapely.geometry import LineString
 
 from poller.base import BaseData
 from poller.traffic import COLOUR_LABEL, AtmsSnapshot, Closure, Incident, Sign
+
+WINDOW_S = 600  # the segment speed window; __main__ imports it
 from poller.model import TO_WGS, Observation
 from poller.speed import VehicleState
 
@@ -74,7 +76,10 @@ def write_segments(path: Path, base: BaseData, speeds: list[tuple[int, str, floa
                 "speed_vds_kmh": None if vds is None else round(vds[0], 1), "n_vds": 0 if vds is None else vds[1],
             },
         })
-    _write_atomic(path, {"type": "FeatureCollection", "generated": _iso(now), "window_s": 600, "features": feats})
+    _write_atomic(path, {"type": "FeatureCollection", "generated": _iso(now), "window_s": WINDOW_S, "features": feats})
+    # The viewer joins speeds to the road tiles by segment_id and never reads this geometry, so a
+    # properties-only copy (about half the bytes raw, a third gzipped) goes next to it for the live channel.
+    _write_atomic(path.with_suffix(".json"), {"generated": _iso(now), "window_s": WINDOW_S, "rows": [f["properties"] for f in feats]})
     return len(feats)
 
 

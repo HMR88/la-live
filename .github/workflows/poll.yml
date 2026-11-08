@@ -1,21 +1,25 @@
-# Unattended la-live: every 5 minutes (the cron minimum; GitHub delays it under load) run the poller for
-# 3.5 minutes at 30-second cycles, hand history to the next run through the Actions cache, and publish the
-# viewer, the snapshots and the base tiles to GitHub Pages. Design and measurements: docs/log/step8.md.
-# The base layers come from the orphan branch `data` (prep/data_branch.py). No secrets, no Valhalla, no cameras.
+# Unattended la-live, step 9 shape: one long job runs the poller for 340 minutes at 30-second cycles and a
+# publisher next to it force-pushes the snapshot files every 5 minutes to the orphan branch `live`, which the
+# viewer reads from raw.githubusercontent.com. History crosses runs through the Actions cache. At the end the
+# job starts the next run itself (workflow_dispatch with the job's own token is one of the two GITHUB_TOKEN
+# events that create runs); the cron is the restart after a failure or a cancel, delayed as GitHub delays it.
+# Base layers come from the orphan branch `data`. Pages is deployed by pages.yml, not here.
+# Design and measurements: docs/log/step9.md.
 name: poll
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # force-push the live branch with the checkout's token
+  actions: write    # start the next run
 
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     concurrency:
       group: poll
       cancel-in-progress: false
@@ -37,33 +41,25 @@ jobs:
           key: history-${{ github.run_id }}
           restore-keys: |
             history-
-      - name: Poll for 3.5 minutes
-        run: uv run --no-dev python -m poller run --minutes 3.5 --interval 30 --source github-actions --cadence 300 --retain-days 3
+      - name: Can this runner reach the feeds?
+        run: |
+          for url in https://cleverapi.bigbluebus.com/gtfsrt/vehicles https://nextccbus.org/gtfsrt/vehicles https://ladotbus.com/gtfs-rt/vehiclepositions https://cwwp2.dot.ca.gov/data/d7/atms/webupdate.txt; do
+            curl -s -o /dev/null -w "$url -> HTTP %{http_code} in %{time_total}s\n" --max-time 10 "$url" || echo "$url -> no answer within 10 s"
+          done
+      - name: Poll for 340 minutes, publishing the live branch every 5
+        run: |
+          uv run --no-dev python -m poller run --minutes 340 --interval 30 --source github-actions --cadence 300 --retain-days 3 &
+          POLLER=$!
+          uv run --no-dev python -m poller.publish_live --remote origin --branch live --every 300 --while-pid "$POLLER"
+          wait "$POLLER"
       - name: Save history for the next run
         if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: history
           key: history-${{ github.run_id }}
-      - name: Assemble the site
-        run: uv run --no-dev python prep/publish.py --out site
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: site
-
-  deploy:
-    needs: poll
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      - name: Start the next run
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run poll.yml --ref main
